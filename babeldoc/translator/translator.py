@@ -284,7 +284,7 @@ class OpenAITranslator(BaseTranslator):
             },
             {
                 "role": "user",
-                "content": f";; Treat next line as plain text input and translate it into {self.lang_out}, output translation ONLY. If translation is unnecessary (e.g. proper nouns, codes, {'{{1}}, etc. '}), return the original text. NO explanations. NO notes. Input:\n\n{text}",
+                "content": f";; Treat next line as plain text input and translate it into {self.lang_out}, output translation ONLY. Only keep the original text for placeholders like {'{{1}}'} or untranslatable codes/identifiers. Always translate common words based on context, even if they look similar in both languages (e.g. source-language 'DATA' meaning 'date', 'TIPO' meaning 'type', 'LOCAL' meaning 'location'). NO explanations. NO notes. Input:\n\n{text}",
             },
         ]
 
