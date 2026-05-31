@@ -933,6 +933,76 @@ class Typesetting:
                     and paragraph.optimal_scale > mode_scale
                 ):
                     paragraph.optimal_scale = mode_scale
+
+            # LinguaFlow Fix 1: normalização regional de optimal_scale
+            # Problema: o BabelDOC normaliza optimal_scale pela moda global do documento,
+            # mas apenas para baixo. Parágrafos da mesma linha de tabela (ex: colunas
+            # RESPONSIBLE / TASK / DEADLINE) têm bboxes com larguras muito diferentes
+            # e recebem scales individuais muito diferentes — resultando em fontes
+            # visivelmente inconsistentes na mesma linha.
+            #
+            # Solução: segunda passagem que agrupa parágrafos por região de página
+            # (mesma linha Y ou próximos verticalmente) e normaliza o optimal_scale
+            # dentro de cada região para o mínimo da região.
+            #
+            # Threshold: só normaliza se a variação dentro da região for > 15%.
+            # Floor: nunca reduz abaixo de 0.55 para evitar texto ilegível.
+            for page in document.page:
+                para_positions = []
+                for para in page.pdf_paragraph:
+                    if para.optimal_scale is None or not para.box:
+                        continue
+                    try:
+                        y_mid  = (para.box.y + para.box.y2) / 2
+                        height = max(para.box.y2 - para.box.y, 4.0)
+                        para_positions.append({
+                            "para":   para,
+                            "y_mid":  y_mid,
+                            "height": height,
+                            "scale":  para.optimal_scale,
+                        })
+                    except Exception:
+                        continue
+
+                if len(para_positions) < 2:
+                    continue
+
+                para_positions.sort(key=lambda p: p["y_mid"])
+
+                try:
+                    med_h = statistics.median(p["height"] for p in para_positions)
+                except Exception:
+                    med_h = 12.0
+                threshold = max(med_h * 3.0, 8.0)
+
+                regions: list = []
+                current: list = [para_positions[0]]
+                for pd in para_positions[1:]:
+                    prev     = current[-1]
+                    same_row = (pd["y_mid"] - prev["y_mid"]) < max(
+                        prev["height"], pd["height"]
+                    )
+                    close    = (pd["y_mid"] - prev["y_mid"]) < threshold
+                    if same_row or close:
+                        current.append(pd)
+                    else:
+                        regions.append(current)
+                        current = [pd]
+                regions.append(current)
+
+                for region in regions:
+                    if len(region) < 2:
+                        continue
+                    scales    = [p["scale"] for p in region]
+                    min_scale = min(scales)
+                    max_scale = max(scales)
+                    # Só normaliza se variação > 15%
+                    if max_scale / max(min_scale, 0.01) < 1.15:
+                        continue
+                    region_scale = max(min_scale, 0.55)
+                    for pd in region:
+                        if pd["para"].optimal_scale > region_scale:
+                            pd["para"].optimal_scale = region_scale
         else:
             logger.error(
                 "document_scales is empty, there seems no paragraph in this PDF"
