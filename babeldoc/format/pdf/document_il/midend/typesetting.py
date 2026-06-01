@@ -1425,8 +1425,15 @@ class Typesetting:
             )
         else:
             # 使用预计算的缩放因子进行重排版
-            precomputed_scale = (
-                paragraph.optimal_scale if paragraph.optimal_scale is not None else 1.0
+            # LinguaFlow: aplica _SCALE_FLOOR aqui — ponto de uso real.
+            # preprocess_document normaliza entre paragrafos mas nao impede que
+            # _get_optimal_scale retorne valores muito baixos para bboxes estreitas
+            # individualmente (ex: item 05, linha hidro-systemas). O floor aqui
+            # garante que nenhum paragrafo renderiza abaixo de 0.80.
+            _RENDER_SCALE_FLOOR = 0.80
+            precomputed_scale = max(
+                paragraph.optimal_scale if paragraph.optimal_scale is not None else 1.0,
+                _RENDER_SCALE_FLOOR,
             )
 
             # 如果有单元无法直接传递，则进行重排版
