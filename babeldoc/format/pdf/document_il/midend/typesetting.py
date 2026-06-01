@@ -934,32 +934,55 @@ class Typesetting:
                 ):
                     paragraph.optimal_scale = mode_scale
 
-            # LinguaFlow Fix 1: normalização regional de optimal_scale
-            # Problema: o BabelDOC normaliza optimal_scale pela moda global do documento,
-            # mas apenas para baixo. Parágrafos da mesma linha de tabela (ex: colunas
-            # RESPONSIBLE / TASK / DEADLINE) têm bboxes com larguras muito diferentes
-            # e recebem scales individuais muito diferentes — resultando em fontes
-            # visivelmente inconsistentes na mesma linha.
+            # LinguaFlow Fix 1 (v2): normalização de optimal_scale em dois níveis
             #
-            # Solução: segunda passagem que agrupa parágrafos por região de página
-            # (mesma linha Y ou próximos verticalmente) e normaliza o optimal_scale
-            # dentro de cada região para o mínimo da região.
+            # Problema: o BabelDOC calcula optimal_scale individualmente por bbox.
+            # Bboxes estreitas (colunas de tabela, labels de grid) recebem scale menor
+            # porque o texto traduzido é mais longo que a bbox comporta.
+            # Resultado: fontes visivelmente inconsistentes em elementos que deveriam
+            # ter o mesmo tamanho visual (TYPE/DATE/LOCATION, itens 1/2/3/4 da pauta,
+            # células de tabela na mesma linha).
             #
-            # Threshold: só normaliza se a variação dentro da região for > 15%.
-            # Floor: nunca reduz abaixo de 0.55 para evitar texto ilegível.
+            # Solução em dois níveis:
+            #
+            # Nível 1 — mesma linha (same-row):
+            #   Parágrafos com y_mid próximo (mesma linha horizontal) são normalizados
+            #   para o scale mínimo da linha. Threshold de variação: 5% (antes 15%).
+            #   Cobre: TYPE/DATE/LOCATION, RESPONSIBLE/TASK/DEADLINE.
+            #
+            # Nível 2 — mesmo tamanho de fonte original (same-font-size):
+            #   Parágrafos com font_size original dentro de 1pt são agrupados globalmente
+            #   e normalizados para o scale mínimo do grupo.
+            #   Cobre: itens 1/2/3/4 da pauta que estão separados verticalmente mas
+            #   têm o mesmo tamanho de fonte no original.
+            #
+            # Floor: nunca reduz abaixo de 0.50 para evitar texto ilegível.
+
+            _SCALE_FLOOR = 0.50
+
             for page in document.page:
                 para_positions = []
                 for para in page.pdf_paragraph:
                     if para.optimal_scale is None or not para.box:
                         continue
                     try:
-                        y_mid  = (para.box.y + para.box.y2) / 2
-                        height = max(para.box.y2 - para.box.y, 4.0)
+                        y_mid    = (para.box.y + para.box.y2) / 2
+                        height   = max(para.box.y2 - para.box.y, 4.0)
+                        # Tenta obter font_size original do primeiro span
+                        font_size = None
+                        try:
+                            if hasattr(para, "original_paragraphs") and para.original_paragraphs:
+                                op = para.original_paragraphs[0]
+                                if hasattr(op, "char_height"):
+                                    font_size = round(op.char_height, 1)
+                        except Exception:
+                            pass
                         para_positions.append({
-                            "para":   para,
-                            "y_mid":  y_mid,
-                            "height": height,
-                            "scale":  para.optimal_scale,
+                            "para":      para,
+                            "y_mid":     y_mid,
+                            "height":    height,
+                            "scale":     para.optimal_scale,
+                            "font_size": font_size,
                         })
                     except Exception:
                         continue
@@ -967,42 +990,60 @@ class Typesetting:
                 if len(para_positions) < 2:
                     continue
 
+                # ── Nível 1: normalização por linha (same-row) ────────────────
                 para_positions.sort(key=lambda p: p["y_mid"])
 
-                try:
-                    med_h = statistics.median(p["height"] for p in para_positions)
-                except Exception:
-                    med_h = 12.0
-                threshold = max(med_h * 3.0, 8.0)
-
-                regions: list = []
+                row_regions: list = []
                 current: list = [para_positions[0]]
                 for pd in para_positions[1:]:
                     prev     = current[-1]
                     same_row = (pd["y_mid"] - prev["y_mid"]) < max(
                         prev["height"], pd["height"]
-                    )
-                    close    = (pd["y_mid"] - prev["y_mid"]) < threshold
-                    if same_row or close:
+                    ) * 0.6
+                    if same_row:
                         current.append(pd)
                     else:
-                        regions.append(current)
+                        row_regions.append(current)
                         current = [pd]
-                regions.append(current)
+                row_regions.append(current)
 
-                for region in regions:
+                for region in row_regions:
                     if len(region) < 2:
                         continue
                     scales    = [p["scale"] for p in region]
                     min_scale = min(scales)
                     max_scale = max(scales)
-                    # Só normaliza se variação > 15%
-                    if max_scale / max(min_scale, 0.01) < 1.15:
+                    # Threshold 5% para mesma linha
+                    if max_scale / max(min_scale, 0.01) < 1.05:
                         continue
-                    region_scale = max(min_scale, 0.55)
+                    region_scale = max(min_scale, _SCALE_FLOOR)
                     for pd in region:
                         if pd["para"].optimal_scale > region_scale:
                             pd["para"].optimal_scale = region_scale
+
+                # ── Nível 2: normalização por tamanho de fonte original ───────
+                font_groups: dict = {}
+                for pd in para_positions:
+                    fs = pd["font_size"]
+                    if fs is None:
+                        continue
+                    # Agrupa por tamanho com tolerância de 1pt
+                    key = round(fs)
+                    font_groups.setdefault(key, []).append(pd)
+
+                for key, group in font_groups.items():
+                    if len(group) < 2:
+                        continue
+                    scales    = [p["para"].optimal_scale for p in group]
+                    min_scale = min(scales)
+                    max_scale = max(scales)
+                    # Threshold 10% para mesmo tamanho de fonte
+                    if max_scale / max(min_scale, 0.01) < 1.10:
+                        continue
+                    group_scale = max(min_scale, _SCALE_FLOOR)
+                    for pd in group:
+                        if pd["para"].optimal_scale > group_scale:
+                            pd["para"].optimal_scale = group_scale
         else:
             logger.error(
                 "document_scales is empty, there seems no paragraph in this PDF"
