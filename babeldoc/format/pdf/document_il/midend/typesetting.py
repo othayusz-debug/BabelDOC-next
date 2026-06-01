@@ -968,17 +968,8 @@ class Typesetting:
                     try:
                         y_mid    = (para.box.y + para.box.y2) / 2
                         height   = max(para.box.y2 - para.box.y, 4.0)
-                        # Obtém font_size original via primeiro caractere do parágrafo
-                        font_size = None
-                        try:
-                            for comp in para.pdf_paragraph_composition:
-                                if comp.pdf_line and comp.pdf_line.pdf_character:
-                                    ch = comp.pdf_line.pdf_character[0]
-                                    if ch.pdf_style and ch.pdf_style.font_size:
-                                        font_size = round(ch.pdf_style.font_size, 1)
-                                        break
-                        except Exception:
-                            pass
+                        # layout_label para agrupamento por tipo semântico
+                        font_size = None  # não usado no Nível 2
                         para_positions.append({
                             "para":      para,
                             "y_mid":     y_mid,
@@ -1023,26 +1014,31 @@ class Typesetting:
                         if pd["para"].optimal_scale > region_scale:
                             pd["para"].optimal_scale = region_scale
 
-                # ── Nível 2: normalização por tamanho de fonte original ───────
-                font_groups: dict = {}
+                # ── Nível 2: normalização por layout_label (mesmo tipo semântico) ─
+                label_groups: dict = {}
                 for pd in para_positions:
-                    fs = pd["font_size"]
-                    if fs is None:
+                    try:
+                        label = pd["para"].layout_label
+                    except Exception:
+                        label = None
+                    if not label or label in ("abandon",):
                         continue
-                    # Agrupa por tamanho com tolerância de 1pt
-                    key = round(fs)
-                    font_groups.setdefault(key, []).append(pd)
+                    label_groups.setdefault(label, []).append(pd)
 
-                for key, group in font_groups.items():
+                for label, group in label_groups.items():
                     if len(group) < 2:
                         continue
                     scales    = [p["para"].optimal_scale for p in group]
                     min_scale = min(scales)
                     max_scale = max(scales)
-                    # Threshold 10% para mesmo tamanho de fonte
+                    # Threshold 10% para mesmo tipo semântico
                     if max_scale / max(min_scale, 0.01) < 1.10:
                         continue
-                    group_scale = max(min_scale, _SCALE_FLOOR)
+                    # Usa mediana para evitar que outliers arrastem o grupo
+                    try:
+                        group_scale = max(statistics.median(scales), _SCALE_FLOOR)
+                    except Exception:
+                        group_scale = max(min_scale, _SCALE_FLOOR)
                     for pd in group:
                         if pd["para"].optimal_scale > group_scale:
                             pd["para"].optimal_scale = group_scale
