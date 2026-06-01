@@ -1014,34 +1014,21 @@ class Typesetting:
                         if pd["para"].optimal_scale > region_scale:
                             pd["para"].optimal_scale = region_scale
 
-                # ── Nível 2: normalização por layout_label (mesmo tipo semântico) ─
-                label_groups: dict = {}
-                for pd in para_positions:
-                    try:
-                        label = pd["para"].layout_label
-                    except Exception:
-                        label = None
-                    if not label or label in ("abandon",):
-                        continue
-                    label_groups.setdefault(label, []).append(pd)
+                # ── Nível 2: removido — causava regressões no texto corrido ─────
 
-                for label, group in label_groups.items():
-                    if len(group) < 2:
+            # ── Nível 3: reset de optimal_scale para titles ───────────────────
+            # Títulos recebem scale individual baseado na bbox, causando fontes
+            # inconsistentes entre títulos do mesmo nível hierárquico.
+            # Solução: forçar mode_scale para todos os elementos title que estão
+            # mais de 10% acima do mode_scale (outliers para cima são reduzidos).
+            for page in document.page:
+                for para in page.pdf_paragraph:
+                    if para.optimal_scale is None:
                         continue
-                    scales    = [p["para"].optimal_scale for p in group]
-                    min_scale = min(scales)
-                    max_scale = max(scales)
-                    # Threshold 10% para mesmo tipo semântico
-                    if max_scale / max(min_scale, 0.01) < 1.10:
+                    if para.layout_label not in ("title",):
                         continue
-                    # Usa mediana para evitar que outliers arrastem o grupo
-                    try:
-                        group_scale = max(statistics.median(scales), _SCALE_FLOOR)
-                    except Exception:
-                        group_scale = max(min_scale, _SCALE_FLOOR)
-                    for pd in group:
-                        if pd["para"].optimal_scale > group_scale:
-                            pd["para"].optimal_scale = group_scale
+                    if para.optimal_scale > mode_scale * 1.10:
+                        para.optimal_scale = mode_scale
         else:
             logger.error(
                 "document_scales is empty, there seems no paragraph in this PDF"
