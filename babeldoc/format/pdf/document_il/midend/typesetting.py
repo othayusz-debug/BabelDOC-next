@@ -968,13 +968,9 @@ class Typesetting:
                     try:
                         y_mid    = (para.box.y + para.box.y2) / 2
                         height   = max(para.box.y2 - para.box.y, 4.0)
-                        # Tenta obter font_size original do pdf_style
+                        # font_size desativado — pdf_style.font_size não é o tamanho
+                        # original confiável para agrupamento global
                         font_size = None
-                        try:
-                            if para.pdf_style and para.pdf_style.font_size:
-                                font_size = round(para.pdf_style.font_size, 1)
-                        except Exception:
-                            pass
                         para_positions.append({
                             "para":      para,
                             "y_mid":     y_mid,
