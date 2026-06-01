@@ -956,7 +956,10 @@ class Typesetting:
             #   Cobre: itens 1/2/3/4 da pauta que estão separados verticalmente mas
             #   têm o mesmo tamanho de fonte no original.
             #
-            # Floor: nunca reduz abaixo de 0.50 para evitar texto ilegível.
+            # Floor: nunca reduz abaixo de 0.80 para evitar texto ilegível.
+            # v0.6.2-linguaflow-11: aumentado de 0.50 → 0.80.
+            # Redução de 50% era muito agressiva para tabelas e subtítulos;
+            # 80% preserva legibilidade e aciona expand_space antes de espremer.
 
             _SCALE_FLOOR = 0.80
 
@@ -968,14 +971,11 @@ class Typesetting:
                     try:
                         y_mid    = (para.box.y + para.box.y2) / 2
                         height   = max(para.box.y2 - para.box.y, 4.0)
-                        # layout_label para agrupamento por tipo semântico
-                        font_size = None  # não usado no Nível 2
                         para_positions.append({
-                            "para":      para,
-                            "y_mid":     y_mid,
-                            "height":    height,
-                            "scale":     para.optimal_scale,
-                            "font_size": font_size,
+                            "para":   para,
+                            "y_mid":  y_mid,
+                            "height": height,
+                            "scale":  para.optimal_scale,
                         })
                     except Exception:
                         continue
@@ -984,6 +984,8 @@ class Typesetting:
                     continue
 
                 # ── Nível 1: normalização por linha (same-row) ────────────────
+                # Parágrafos na mesma linha horizontal usam a menor escala da linha.
+                # Cobre: TYPE/DATE/LOCATION, RESPONSIBLE/TASK/DEADLINE.
                 para_positions.sort(key=lambda p: p["y_mid"])
 
                 row_regions: list = []
@@ -1014,7 +1016,46 @@ class Typesetting:
                         if pd["para"].optimal_scale > region_scale:
                             pd["para"].optimal_scale = region_scale
 
-                # ── Nível 2: removido — causava regressões no texto corrido ─────
+                # ── Nível 2 Restaurado: normalização por altura (subtítulos) ──
+                # Parágrafos com a mesma altura de bbox (proxy para font_size)
+                # e texto curto (≤ 8 palavras) são normalizados juntos.
+                # O filtro de palavras protege texto corrido: parágrafos longos
+                # naturalmente variam de escala e não devem ser tocados.
+                # Cobre: subtítulos H2/H3, labels, cabeçalhos de seção.
+                from collections import defaultdict as _defaultdict
+                height_groups: dict = _defaultdict(list)
+                for pd in para_positions:
+                    h_key = round(pd["height"])
+                    height_groups[h_key].append(pd)
+
+                for h_key, group in height_groups.items():
+                    if len(group) < 2:
+                        continue
+                    # Filtra apenas caixas de texto curto (subtítulos/labels)
+                    short_items = [
+                        p for p in group
+                        if p["para"].pdf_paragraph_composition is not None
+                        and len(
+                            " ".join(
+                                c.char_unicode or ""
+                                for comp in p["para"].pdf_paragraph_composition
+                                for c in ([comp.pdf_character] if comp.pdf_character else
+                                          (comp.pdf_line.pdf_character if comp.pdf_line else []))
+                            ).split()
+                        ) <= 8
+                    ]
+                    if len(short_items) < 2:
+                        continue
+                    scales = [p["scale"] for p in short_items]
+                    min_scale = min(scales)
+                    max_scale = max(scales)
+                    if max_scale / max(min_scale, 0.01) < 1.05:
+                        continue
+                    # Piso ligeiramente maior para subtítulos manterem destaque visual
+                    group_scale = max(min_scale, _SCALE_FLOOR)
+                    for pd in short_items:
+                        if pd["para"].optimal_scale > group_scale:
+                            pd["para"].optimal_scale = group_scale
         else:
             logger.error(
                 "document_scales is empty, there seems no paragraph in this PDF"
@@ -1351,9 +1392,9 @@ class Typesetting:
             )
         else:
             # 使用预计算的缩放因子进行重排版
-            # LinguaFlow fix: floor de 0.80 aplicado no ponto de renderização.
-            # _get_optimal_scale pode retornar valores baixos para bboxes estreitas
-            # (item 05, células de tabela) e esse valor chega aqui sem nenhum limite.
+            # LinguaFlow: floor 0.80 no ponto de renderização.
+            # Cobre bboxes individuais estreitas (item 05, hidro-systemas)
+            # que escapam da normalização do preprocess_document.
             precomputed_scale = max(
                 paragraph.optimal_scale if paragraph.optimal_scale is not None else 1.0,
                 0.80,
