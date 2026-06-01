@@ -915,6 +915,28 @@ class Typesetting:
 
                 if paragraph.optimal_scale is not None:
                     all_scales.extend([paragraph.optimal_scale] * unit_count)
+                    # LinguaFlow DEBUG: loga parágrafos com scale baixo
+                    if paragraph.optimal_scale < 0.90 and paragraph.box:
+                        try:
+                            sample = ""
+                            for comp in (paragraph.pdf_paragraph_composition or []):
+                                if comp.pdf_character and comp.pdf_character.char_unicode:
+                                    sample += comp.pdf_character.char_unicode
+                                elif comp.pdf_line:
+                                    for c in comp.pdf_line.pdf_character:
+                                        if c.char_unicode:
+                                            sample += c.char_unicode
+                                if len(sample) > 60:
+                                    break
+                            logger.warning(
+                                f"[LF_DEBUG] scale={paragraph.optimal_scale:.3f} "
+                                f"box=({paragraph.box.x:.1f},{paragraph.box.y:.1f},"
+                                f"{paragraph.box.x2:.1f},{paragraph.box.y2:.1f}) "
+                                f"w={paragraph.box.x2-paragraph.box.x:.1f} "
+                                f"text={repr(sample[:60])}"
+                            )
+                        except Exception:
+                            pass
 
         # 获取缩放因子的众数
         if all_scales:
@@ -1009,6 +1031,39 @@ class Typesetting:
                     min_scale = min(scales)
                     max_scale = max(scales)
                     # Threshold 5% para mesma linha
+                    if max_scale / max(min_scale, 0.01) < 1.05:
+                        continue
+                    region_scale = max(min_scale, _SCALE_FLOOR)
+                    for pd in region:
+                        if pd["para"].optimal_scale > region_scale:
+                            pd["para"].optimal_scale = region_scale
+
+                # ── Nível 1-B: normalização por coluna (same-column) ──────────
+                # Parágrafos alinhados verticalmente na mesma coluna (mesmo box.x
+                # com tolerância de 5pt) usam a menor escala da coluna.
+                # Cobre: células de tabela na mesma coluna, listas numeradas.
+                para_positions.sort(key=lambda p: p["para"].box.x if p["para"].box else 0)
+
+                col_regions: list = []
+                current_col: list = [para_positions[0]]
+                for pd in para_positions[1:]:
+                    prev_x = current_col[-1]["para"].box.x if current_col[-1]["para"].box else 0
+                    curr_x = pd["para"].box.x if pd["para"].box else 0
+                    same_col = abs(curr_x - prev_x) < 5.0
+                    if same_col:
+                        current_col.append(pd)
+                    else:
+                        col_regions.append(current_col)
+                        current_col = [pd]
+                col_regions.append(current_col)
+
+                for region in col_regions:
+                    if len(region) < 2:
+                        continue
+                    scales = [p["scale"] for p in region]
+                    min_scale = min(scales)
+                    max_scale = max(scales)
+                    # Só normaliza se há variação real (> 5%) entre células da coluna
                     if max_scale / max(min_scale, 0.01) < 1.05:
                         continue
                     region_scale = max(min_scale, _SCALE_FLOOR)
@@ -1392,12 +1447,8 @@ class Typesetting:
             )
         else:
             # 使用预计算的缩放因子进行重排版
-            # LinguaFlow: floor 0.80 no ponto de renderização.
-            # Cobre bboxes individuais estreitas (item 05, hidro-systemas)
-            # que escapam da normalização do preprocess_document.
-            precomputed_scale = max(
-                paragraph.optimal_scale if paragraph.optimal_scale is not None else 1.0,
-                0.80,
+            precomputed_scale = (
+                paragraph.optimal_scale if paragraph.optimal_scale is not None else 1.0
             )
 
             # 如果有单元无法直接传递，则进行重排版
