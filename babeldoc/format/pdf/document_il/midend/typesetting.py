@@ -915,28 +915,6 @@ class Typesetting:
 
                 if paragraph.optimal_scale is not None:
                     all_scales.extend([paragraph.optimal_scale] * unit_count)
-                    # LinguaFlow DEBUG: loga parágrafos com scale baixo
-                    if paragraph.optimal_scale < 0.90 and paragraph.box:
-                        try:
-                            sample = ""
-                            for comp in (paragraph.pdf_paragraph_composition or []):
-                                if comp.pdf_character and comp.pdf_character.char_unicode:
-                                    sample += comp.pdf_character.char_unicode
-                                elif comp.pdf_line:
-                                    for c in comp.pdf_line.pdf_character:
-                                        if c.char_unicode:
-                                            sample += c.char_unicode
-                                if len(sample) > 60:
-                                    break
-                            logger.warning(
-                                f"[LF_DEBUG] scale={paragraph.optimal_scale:.3f} "
-                                f"box=({paragraph.box.x:.1f},{paragraph.box.y:.1f},"
-                                f"{paragraph.box.x2:.1f},{paragraph.box.y2:.1f}) "
-                                f"w={paragraph.box.x2-paragraph.box.x:.1f} "
-                                f"text={repr(sample[:60])}"
-                            )
-                        except Exception:
-                            pass
 
         # 获取缩放因子的众数
         if all_scales:
@@ -948,13 +926,69 @@ class Typesetting:
                     "Could not find a mode for paragraph scales. Falling back to median."
                 )
                 mode_scale = statistics.median(all_scales)
-            # 将所有大于众数的值修改为众数
+            # LinguaFlow: floor dinâmico por idioma de saída.
+            #
+            # Idiomas que expandem muito vs português (DE, FR) precisam de
+            # floor menor — o texto genuinamente não cabe na bbox original.
+            # Idiomas que contraem (EN, CJK) suportam floor maior sem overflow.
+            #
+            # Tabela de expansão típica vs português:
+            #   EN: -10 a -15%  → floor 0.82 (texto menor, cabe fácil)
+            #   ES: +5 a +10%   → floor 0.80
+            #   FR: +15 a +20%  → floor 0.76
+            #   DE: +20 a +30%  → floor 0.72
+            #   RU: +15 a +25%  → floor 0.74
+            #   AR: -10 a +5%   → floor 0.80
+            #   CJK: -30 a -40% → floor 0.85 (texto muito menor)
+            # TYPESETTING_SCALE_FLOOR: override manual via env var.
+            # Se definido, ignora a tabela por idioma e usa o valor fixo.
+            # Ex: TYPESETTING_SCALE_FLOOR=0.75 no docker-compose.
+            import os as _os
+            _env_floor = _os.getenv("TYPESETTING_SCALE_FLOOR")
+            if _env_floor is not None:
+                try:
+                    _SCALE_FLOOR = float(_env_floor)
+                except ValueError:
+                    _SCALE_FLOOR = 0.78
+            else:
+                _LANG_SCALE_FLOORS = {
+                    "EN": 0.82,
+                    "ES": 0.80,
+                    "IT": 0.80,
+                    "PT": 0.80,
+                    "NL": 0.78,
+                    "RU": 0.74,
+                    "FR": 0.76,
+                    "DE": 0.72,
+                    "PL": 0.74,
+                    "TR": 0.76,
+                    "AR": 0.80,
+                    "HI": 0.78,
+                }
+                # CJK: texto muito mais compacto, floor mais alto é seguro
+                if self.is_cjk:
+                    _SCALE_FLOOR = 0.85
+                else:
+                    lang_prefix = self.lang_code[:2]
+                    _SCALE_FLOOR = _LANG_SCALE_FLOORS.get(lang_prefix, 0.78)
             for paragraph in all_paragraphs:
                 if (
                     paragraph.optimal_scale is not None
-                    and paragraph.optimal_scale > mode_scale
+                    and paragraph.optimal_scale < _SCALE_FLOOR
                 ):
-                    paragraph.optimal_scale = mode_scale
+                    paragraph.optimal_scale = _SCALE_FLOOR
+
+            # 将所有大于众数的值修改为众数
+            # LinguaFlow: só aplica mode_scale se ela estiver acima do floor.
+            # Evita que a moda do documento (ex: 0.70) arraste parágrafos
+            # que já tinham scale > 0.80 para baixo.
+            effective_mode = max(mode_scale, _SCALE_FLOOR)
+            for paragraph in all_paragraphs:
+                if (
+                    paragraph.optimal_scale is not None
+                    and paragraph.optimal_scale > effective_mode
+                ):
+                    paragraph.optimal_scale = effective_mode
 
             # LinguaFlow Fix 1 (v2): normalização de optimal_scale em dois níveis
             #
@@ -982,8 +1016,6 @@ class Typesetting:
             # v0.6.2-linguaflow-11: aumentado de 0.50 → 0.80.
             # Redução de 50% era muito agressiva para tabelas e subtítulos;
             # 80% preserva legibilidade e aciona expand_space antes de espremer.
-
-            _SCALE_FLOOR = 0.80
 
             for page in document.page:
                 para_positions = []
