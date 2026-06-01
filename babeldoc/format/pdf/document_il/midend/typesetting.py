@@ -1027,7 +1027,7 @@ class Typesetting:
                 for pd in para_positions[1:]:
                     prev_x = current_col[-1]["para"].box.x if current_col[-1]["para"].box else 0
                     curr_x = pd["para"].box.x if pd["para"].box else 0
-                    same_col = abs(curr_x - prev_x) < 5.0
+                    same_col = abs(curr_x - prev_x) < 15.0
                     if same_col:
                         current_col.append(pd)
                     else:
@@ -1075,7 +1075,7 @@ class Typesetting:
                                 for c in ([comp.pdf_character] if comp.pdf_character else
                                           (comp.pdf_line.pdf_character if comp.pdf_line else []))
                             ).split()
-                        ) <= 8
+                        ) <= 12
                     ]
                     if len(short_items) < 2:
                         continue
