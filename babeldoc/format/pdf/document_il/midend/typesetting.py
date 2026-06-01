@@ -968,13 +968,11 @@ class Typesetting:
                     try:
                         y_mid    = (para.box.y + para.box.y2) / 2
                         height   = max(para.box.y2 - para.box.y, 4.0)
-                        # Tenta obter font_size original do primeiro span
+                        # Tenta obter font_size original do pdf_style
                         font_size = None
                         try:
-                            if hasattr(para, "original_paragraphs") and para.original_paragraphs:
-                                op = para.original_paragraphs[0]
-                                if hasattr(op, "char_height"):
-                                    font_size = round(op.char_height, 1)
+                            if para.pdf_style and para.pdf_style.font_size:
+                                font_size = round(para.pdf_style.font_size, 1)
                         except Exception:
                             pass
                         para_positions.append({
