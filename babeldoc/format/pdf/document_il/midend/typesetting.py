@@ -1015,41 +1015,6 @@ class Typesetting:
                             pd["para"].optimal_scale = region_scale
 
                 # ── Nível 2: removido — causava regressões no texto corrido ─────
-
-            # ── Nível 3: normalização bidirecional de titles ──────────────────
-            # Títulos com texto traduzido mais longo recebem scale menor (bbox
-            # estreita). Títulos com texto mais curto recebem scale maior.
-            # Resultado: fontes inconsistentes entre títulos do mesmo nível.
-            #
-            # Solução: calcular a mediana dos scales de todos os titles do
-            # documento e normalizar os outliers (>10% de desvio) para essa
-            # mediana. Bidirecional — corrige tanto os muito pequenos quanto
-            # os muito grandes.
-            title_scales = []
-            for page in document.page:
-                for para in page.pdf_paragraph:
-                    if (para.layout_label == "title"
-                            and para.optimal_scale is not None):
-                        title_scales.append(para.optimal_scale)
-
-            if len(title_scales) >= 2:
-                try:
-                    title_mode = statistics.median(title_scales)
-                except Exception:
-                    title_mode = None
-
-                if title_mode and title_mode > 0:
-                    for page in document.page:
-                        for para in page.pdf_paragraph:
-                            if (para.layout_label == "title"
-                                    and para.optimal_scale is not None):
-                                deviation = abs(
-                                    para.optimal_scale - title_mode
-                                ) / title_mode
-                                if deviation > 0.10:
-                                    para.optimal_scale = max(
-                                        title_mode, _SCALE_FLOOR
-                                    )
         else:
             logger.error(
                 "document_scales is empty, there seems no paragraph in this PDF"
