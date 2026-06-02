@@ -1218,62 +1218,53 @@ class Typesetting:
             if not hasattr(paragraph, "debug_id") or not paragraph.debug_id:
                 return scale, final_typeset_units
 
+            # LinguaFlow: tenta expandir a bbox ANTES de reduzir o scale.
+            # O floor impede o scale de cair, então o expand nunca dispararia
+            # com o threshold antigo baseado em scale < X. Agora expande sempre
+            # que o texto não coube no scale atual, independente do valor.
+            if expand_space_flag == 0:
+                space_expanded = False
+                try:
+                    min_y = self.get_max_bottom_space(box, page) + 2
+                    if min_y < box.y:
+                        expanded_box = Box(x=box.x, y=min_y, x2=box.x2, y2=box.y2)
+                        box = expanded_box
+                        if apply_layout:
+                            paragraph.box = expanded_box
+                        space_expanded = True
+                except Exception:
+                    pass
+                expand_space_flag = 1
+                if space_expanded:
+                    continue
+
+            elif expand_space_flag == 1:
+                space_expanded = False
+                try:
+                    max_x = self.get_max_right_space(box, page) - 5
+                    if max_x > box.x2:
+                        expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
+                        box = expanded_box
+                        if apply_layout:
+                            paragraph.box = expanded_box
+                        space_expanded = True
+                except Exception:
+                    pass
+                expand_space_flag = 2
+                if space_expanded:
+                    continue
+
             # 减小缩放因子
             if scale > 0.6:
                 scale -= 0.05
             else:
                 scale -= 0.1
 
-            # LinguaFlow: threshold 0.7 → 0.80 (logo abaixo do floor EN=0.82).
-            # Expande bbox apenas quando o scale já chegou no mínimo permitido
-            # e o texto ainda não cabe. Evita expansão prematura que quebrava
-            # MINUTES, Name/Identification e itens das resolutions.
             if scale < 0.80:
                 space_expanded = False  # 标记是否成功扩展了空间
 
-                if expand_space_flag == 0:
-                    # 尝试向下扩展
-                    try:
-                        min_y = self.get_max_bottom_space(box, page) + 2
-                        if min_y < box.y:
-                            expanded_box = Box(x=box.x, y=min_y, x2=box.x2, y2=box.y2)
-                            box = expanded_box
-                            if apply_layout:
-                                # 更新段落的边界框
-                                paragraph.box = expanded_box
-                            space_expanded = True
-                    except Exception:
-                        pass
-                    expand_space_flag = 1
-
-                    # 只有成功扩展空间时才 continue，否则继续减小 scale
-                    if space_expanded:
-                        continue
-
-                elif expand_space_flag == 1:
-                    # 尝试向右扩展
-                    try:
-                        max_x = self.get_max_right_space(box, page) - 5
-                        if max_x > box.x2:
-                            expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
-                            box = expanded_box
-                            if apply_layout:
-                                # 更新段落的边界框
-                                paragraph.box = expanded_box
-                            space_expanded = True
-                    except Exception:
-                        pass
-                    expand_space_flag = 2
-
-                    # 只有成功扩展空间时才 continue，否则继续减小 scale
-                    if space_expanded:
-                        continue
-
-                # 只有在扩展尝试阶段 (expand_space_flag < 2) 且扩展失败时才重置 scale
-                # 当 expand_space_flag >= 2 时，说明已经尝试过所有扩展，应该继续正常的 scale 减小
-                if expand_space_flag < 2:
-                    # 如果无法扩展空间，重置 scale 并继续循环
-                    scale = 1.0
+                # expand já foi tentado antes da redução de scale (bloco acima)
+                pass
 
         # 如果仍然放不下，尝试去除英文换行限制
         if use_english_line_break:
