@@ -926,69 +926,13 @@ class Typesetting:
                     "Could not find a mode for paragraph scales. Falling back to median."
                 )
                 mode_scale = statistics.median(all_scales)
-            # LinguaFlow: floor dinâmico por idioma de saída.
-            #
-            # Idiomas que expandem muito vs português (DE, FR) precisam de
-            # floor menor — o texto genuinamente não cabe na bbox original.
-            # Idiomas que contraem (EN, CJK) suportam floor maior sem overflow.
-            #
-            # Tabela de expansão típica vs português:
-            #   EN: -10 a -15%  → floor 0.82 (texto menor, cabe fácil)
-            #   ES: +5 a +10%   → floor 0.80
-            #   FR: +15 a +20%  → floor 0.76
-            #   DE: +20 a +30%  → floor 0.72
-            #   RU: +15 a +25%  → floor 0.74
-            #   AR: -10 a +5%   → floor 0.80
-            #   CJK: -30 a -40% → floor 0.85 (texto muito menor)
-            # TYPESETTING_SCALE_FLOOR: override manual via env var.
-            # Se definido, ignora a tabela por idioma e usa o valor fixo.
-            # Ex: TYPESETTING_SCALE_FLOOR=0.75 no docker-compose.
-            import os as _os
-            _env_floor = _os.getenv("TYPESETTING_SCALE_FLOOR")
-            if _env_floor is not None:
-                try:
-                    _SCALE_FLOOR = float(_env_floor)
-                except ValueError:
-                    _SCALE_FLOOR = 0.78
-            else:
-                _LANG_SCALE_FLOORS = {
-                    "EN": 0.82,
-                    "ES": 0.80,
-                    "IT": 0.80,
-                    "PT": 0.80,
-                    "NL": 0.78,
-                    "RU": 0.74,
-                    "FR": 0.76,
-                    "DE": 0.72,
-                    "PL": 0.74,
-                    "TR": 0.76,
-                    "AR": 0.80,
-                    "HI": 0.78,
-                }
-                # CJK: texto muito mais compacto, floor mais alto é seguro
-                if self.is_cjk:
-                    _SCALE_FLOOR = 0.85
-                else:
-                    lang_prefix = self.lang_code[:2]
-                    _SCALE_FLOOR = _LANG_SCALE_FLOORS.get(lang_prefix, 0.78)
-            for paragraph in all_paragraphs:
-                if (
-                    paragraph.optimal_scale is not None
-                    and paragraph.optimal_scale < _SCALE_FLOOR
-                ):
-                    paragraph.optimal_scale = _SCALE_FLOOR
-
             # 将所有大于众数的值修改为众数
-            # LinguaFlow: só aplica mode_scale se ela estiver acima do floor.
-            # Evita que a moda do documento (ex: 0.70) arraste parágrafos
-            # que já tinham scale > 0.80 para baixo.
-            effective_mode = max(mode_scale, _SCALE_FLOOR)
             for paragraph in all_paragraphs:
                 if (
                     paragraph.optimal_scale is not None
-                    and paragraph.optimal_scale > effective_mode
+                    and paragraph.optimal_scale > mode_scale
                 ):
-                    paragraph.optimal_scale = effective_mode
+                    paragraph.optimal_scale = mode_scale
 
             # LinguaFlow Fix 1 (v2): normalização de optimal_scale em dois níveis
             #
@@ -1016,6 +960,8 @@ class Typesetting:
             # v0.6.2-linguaflow-11: aumentado de 0.50 → 0.80.
             # Redução de 50% era muito agressiva para tabelas e subtítulos;
             # 80% preserva legibilidade e aciona expand_space antes de espremer.
+
+            _SCALE_FLOOR = 0.80
 
             for page in document.page:
                 para_positions = []
@@ -1180,6 +1126,13 @@ class Typesetting:
         expand_space_flag = 0
         final_typeset_units = None
 
+        # LinguaFlow: desabilita english_line_break em bboxes estreitas.
+        # O lookahead reserva espaço para a próxima palavra, causando quebras
+        # prematuras em células pequenas ("30 days", "MINUTES", subtítulos).
+        # Bboxes < 120pt não têm espaço para ser conservadoras.
+        if use_english_line_break and box and (box.x2 - box.x) < 120:
+            use_english_line_break = False
+
         while scale >= min_scale:
             try:
                 # 尝试布局排版单元
@@ -1218,53 +1171,58 @@ class Typesetting:
             if not hasattr(paragraph, "debug_id") or not paragraph.debug_id:
                 return scale, final_typeset_units
 
-            # LinguaFlow: tenta expandir a bbox ANTES de reduzir o scale.
-            # O floor impede o scale de cair, então o expand nunca dispararia
-            # com o threshold antigo baseado em scale < X. Agora expande sempre
-            # que o texto não coube no scale atual, independente do valor.
-            if expand_space_flag == 0:
-                space_expanded = False
-                try:
-                    min_y = self.get_max_bottom_space(box, page) + 2
-                    if min_y < box.y:
-                        expanded_box = Box(x=box.x, y=min_y, x2=box.x2, y2=box.y2)
-                        box = expanded_box
-                        if apply_layout:
-                            paragraph.box = expanded_box
-                        space_expanded = True
-                except Exception:
-                    pass
-                expand_space_flag = 1
-                if space_expanded:
-                    continue
-
-            elif expand_space_flag == 1:
-                space_expanded = False
-                try:
-                    max_x = self.get_max_right_space(box, page) - 5
-                    if max_x > box.x2:
-                        expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
-                        box = expanded_box
-                        if apply_layout:
-                            paragraph.box = expanded_box
-                        space_expanded = True
-                except Exception:
-                    pass
-                expand_space_flag = 2
-                if space_expanded:
-                    continue
-
             # 减小缩放因子
             if scale > 0.6:
                 scale -= 0.05
             else:
                 scale -= 0.1
 
-            if scale < 0.80:
+            if scale < 0.7:
                 space_expanded = False  # 标记是否成功扩展了空间
 
-                # expand já foi tentado antes da redução de scale (bloco acima)
-                pass
+                if expand_space_flag == 0:
+                    # 尝试向下扩展
+                    try:
+                        min_y = self.get_max_bottom_space(box, page) + 2
+                        if min_y < box.y:
+                            expanded_box = Box(x=box.x, y=min_y, x2=box.x2, y2=box.y2)
+                            box = expanded_box
+                            if apply_layout:
+                                # 更新段落的边界框
+                                paragraph.box = expanded_box
+                            space_expanded = True
+                    except Exception:
+                        pass
+                    expand_space_flag = 1
+
+                    # 只有成功扩展空间时才 continue，否则继续减小 scale
+                    if space_expanded:
+                        continue
+
+                elif expand_space_flag == 1:
+                    # 尝试向右扩展
+                    try:
+                        max_x = self.get_max_right_space(box, page) - 5
+                        if max_x > box.x2:
+                            expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
+                            box = expanded_box
+                            if apply_layout:
+                                # 更新段落的边界框
+                                paragraph.box = expanded_box
+                            space_expanded = True
+                    except Exception:
+                        pass
+                    expand_space_flag = 2
+
+                    # 只有成功扩展空间时才 continue，否则继续减小 scale
+                    if space_expanded:
+                        continue
+
+                # 只有在扩展尝试阶段 (expand_space_flag < 2) 且扩展失败时才重置 scale
+                # 当 expand_space_flag >= 2 时，说明已经尝试过所有扩展，应该继续正常的 scale 减小
+                if expand_space_flag < 2:
+                    # 如果无法扩展空间，重置 scale 并继续循环
+                    scale = 1.0
 
         # 如果仍然放不下，尝试去除英文换行限制
         if use_english_line_break:
