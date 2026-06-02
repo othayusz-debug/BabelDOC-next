@@ -1224,11 +1224,11 @@ class Typesetting:
             else:
                 scale -= 0.1
 
-            # LinguaFlow: threshold elevado de 0.7 → 0.95.
-            # O expand_space agora dispara logo que o texto não cabe em scale alto,
-            # antes de reduzir a fonte. Resolve quebra de linha em subtítulos e
-            # células de tabela onde a tradução é mais longa que o original.
-            if scale < 0.95:
+            # LinguaFlow: threshold 0.7 → 0.80 (logo abaixo do floor EN=0.82).
+            # Expande bbox apenas quando o scale já chegou no mínimo permitido
+            # e o texto ainda não cabe. Evita expansão prematura que quebrava
+            # MINUTES, Name/Identification e itens das resolutions.
+            if scale < 0.80:
                 space_expanded = False  # 标记是否成功扩展了空间
 
                 if expand_space_flag == 0:
