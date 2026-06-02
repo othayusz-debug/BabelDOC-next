@@ -1595,8 +1595,8 @@ class Typesetting:
                 # LinguaFlow Fix 1: [i+1:] evita double-counting do char atual.
                 # [i:] somava width(char_atual) dentro do lookahead E na verificação
                 # current_x + unit_width + lookahead → forçava quebra prematura
-                # (ex: "55E9" → "55E
-9"). Edge case: i é o último → [] → retorna 0.
+                # Evita double-counting: [i+1:] exclui o char atual do lookahead.
+                # Edge case: i e o ultimo elemento -> [] -> retorna 0.
                 width_before_next_break_point = self._get_width_before_next_break_point(
                     typesetting_units[i + 1:], scale
                 )
