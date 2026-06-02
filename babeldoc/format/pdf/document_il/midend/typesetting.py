@@ -1057,7 +1057,7 @@ class Typesetting:
                 for pd in para_positions[1:]:
                     prev_x = current_col[-1]["para"].box.x if current_col[-1]["para"].box else 0
                     curr_x = pd["para"].box.x if pd["para"].box else 0
-                    same_col = abs(curr_x - prev_x) < 5.0
+                    same_col = abs(curr_x - prev_x) < 8.0  # LinguaFlow Fix 3: 5→8pt
                     if same_col:
                         current_col.append(pd)
                     else:
@@ -1156,7 +1156,14 @@ class Typesetting:
         expand_space_flag = 0
         final_typeset_units = None
 
-
+        # LinguaFlow: desabilita english_line_break quando o texto tem poucas
+        # unidades de tipagem (≤ 6 palavras) OU bbox é muito estreita (< 80pt).
+        # O lookahead causa quebras prematuras em "30 days", subtítulos curtos
+        # e células de tabela. Texto corrido tem muitas unidades e não é afetado.
+        _narrow_box = box and (box.x2 - box.x) < 80
+        _few_units = len(typesetting_units) <= 6
+        if use_english_line_break and (_narrow_box or _few_units):
+            use_english_line_break = False
 
         while scale >= min_scale:
             try:
@@ -1585,23 +1592,22 @@ class Typesetting:
             ):
                 current_x += space_width * 0.5
             if use_english_line_break:
+                # LinguaFlow Fix 1: [i+1:] evita double-counting do char atual.
+                # [i:] somava width(char_atual) dentro do lookahead E na verificação
+                # current_x + unit_width + lookahead → forçava quebra prematura
+                # (ex: "55E9" → "55E
+9"). Edge case: i é o último → [] → retorna 0.
                 width_before_next_break_point = self._get_width_before_next_break_point(
-                    typesetting_units[i:], scale
+                    typesetting_units[i + 1:], scale
                 )
             else:
                 width_before_next_break_point = 0
 
             # 如果当前行放不下这个元素，换行
-            # LinguaFlow: o lookahead só quebra linha se ainda estamos na
-            # primeira metade da linha. Na segunda metade, confiar na quebra
-            # natural evita quebras prematuras em células estreitas e subtítulos.
-            _line_width = box.x2 - box.x
-            _in_first_half = (current_x - box.x) < _line_width * 0.5
             if not unit.is_hung_punctuation and (
                 (current_x + unit_width > box.x2)
                 or (
                     use_english_line_break
-                    and _in_first_half
                     and current_x + unit_width + width_before_next_break_point > box.x2
                 )
                 or (
