@@ -915,25 +915,6 @@ class Typesetting:
 
                 if paragraph.optimal_scale is not None:
                     all_scales.extend([paragraph.optimal_scale] * unit_count)
-                    if paragraph.optimal_scale < 0.95 and paragraph.box:
-                        try:
-                            sample = ""
-                            for comp in (paragraph.pdf_paragraph_composition or []):
-                                if hasattr(comp, "pdf_character") and comp.pdf_character and comp.pdf_character.char_unicode:
-                                    sample += comp.pdf_character.char_unicode
-                                elif hasattr(comp, "pdf_line") and comp.pdf_line:
-                                    for c in comp.pdf_line.pdf_character:
-                                        if c.char_unicode:
-                                            sample += c.char_unicode
-                                if len(sample) > 40:
-                                    break
-                            logger.warning(
-                                f"[LF_DEBUG_TS] scale={paragraph.optimal_scale:.3f} "
-                                f"w={paragraph.box.x2-paragraph.box.x:.1f} "
-                                f"text={repr(sample[:40])}"
-                            )
-                        except Exception:
-                            pass
 
         # 获取缩放因子的众数
         if all_scales:
@@ -1171,18 +1152,30 @@ class Typesetting:
         box = paragraph.box
         scale = initial_scale
         line_skip = 1.50 if self.is_cjk else 1.3
-        min_scale = 0.1
         expand_space_flag = 0
         final_typeset_units = None
 
-        # LinguaFlow: desabilita english_line_break quando o texto tem poucas
-        # unidades de tipagem (≤ 6 palavras) OU bbox é muito estreita (< 80pt).
-        # O lookahead causa quebras prematuras em "30 days", subtítulos curtos
-        # e células de tabela. Texto corrido tem muitas unidades e não é afetado.
-        _narrow_box = box and (box.x2 - box.x) < 80
-        _few_units = len(typesetting_units) <= 6
-        if use_english_line_break and (_narrow_box or _few_units):
-            use_english_line_break = False
+        # LinguaFlow: floor dinamico por idioma como min_scale do loop.
+        # Impede o scale de cair abaixo do minimo permitido para o idioma,
+        # resolvendo parágrafos com scale=0.60/0.70 que escapavam do
+        # effective_mode no preprocess_document.
+        import os as _os2
+        _env_floor2 = _os2.getenv("TYPESETTING_SCALE_FLOOR")
+        if _env_floor2 is not None:
+            try:
+                min_scale = float(_env_floor2)
+            except ValueError:
+                min_scale = 0.78
+        else:
+            _LANG_FLOORS2 = {
+                "EN": 0.82, "ES": 0.80, "IT": 0.80, "PT": 0.80,
+                "NL": 0.78, "RU": 0.74, "FR": 0.76, "DE": 0.72,
+                "PL": 0.74, "TR": 0.76, "AR": 0.80, "HI": 0.78,
+            }
+            if self.is_cjk:
+                min_scale = 0.85
+            else:
+                min_scale = _LANG_FLOORS2.get(self.lang_code[:2], 0.78)
 
         while scale >= min_scale:
             try:
