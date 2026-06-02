@@ -926,13 +926,43 @@ class Typesetting:
                     "Could not find a mode for paragraph scales. Falling back to median."
                 )
                 mode_scale = statistics.median(all_scales)
-            # 将所有大于众数的值修改为众数
+            # LinguaFlow: floor dinâmico por idioma antes de normalizar pela moda.
+            import os as _os
+            _env_floor = _os.getenv("TYPESETTING_SCALE_FLOOR")
+            if _env_floor is not None:
+                try:
+                    _SCALE_FLOOR_GLOBAL = float(_env_floor)
+                except ValueError:
+                    _SCALE_FLOOR_GLOBAL = 0.78
+            else:
+                _LANG_SCALE_FLOORS = {
+                    "EN": 0.82, "ES": 0.80, "IT": 0.80, "PT": 0.80,
+                    "NL": 0.78, "RU": 0.74, "FR": 0.76, "DE": 0.72,
+                    "PL": 0.74, "TR": 0.76, "AR": 0.80, "HI": 0.78,
+                }
+                if self.is_cjk:
+                    _SCALE_FLOOR_GLOBAL = 0.85
+                else:
+                    _SCALE_FLOOR_GLOBAL = _LANG_SCALE_FLOORS.get(
+                        self.lang_code[:2], 0.78
+                    )
+
+            # Aplica floor individual — sobe parágrafos abaixo do mínimo
             for paragraph in all_paragraphs:
                 if (
                     paragraph.optimal_scale is not None
-                    and paragraph.optimal_scale > mode_scale
+                    and paragraph.optimal_scale < _SCALE_FLOOR_GLOBAL
                 ):
-                    paragraph.optimal_scale = mode_scale
+                    paragraph.optimal_scale = _SCALE_FLOOR_GLOBAL
+
+            # Normaliza pela moda mas nunca abaixo do floor
+            effective_mode = max(mode_scale, _SCALE_FLOOR_GLOBAL)
+            for paragraph in all_paragraphs:
+                if (
+                    paragraph.optimal_scale is not None
+                    and paragraph.optimal_scale > effective_mode
+                ):
+                    paragraph.optimal_scale = effective_mode
 
             # LinguaFlow Fix 1 (v2): normalização de optimal_scale em dois níveis
             #
