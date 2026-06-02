@@ -915,6 +915,25 @@ class Typesetting:
 
                 if paragraph.optimal_scale is not None:
                     all_scales.extend([paragraph.optimal_scale] * unit_count)
+                    if paragraph.optimal_scale < 0.95 and paragraph.box:
+                        try:
+                            sample = ""
+                            for comp in (paragraph.pdf_paragraph_composition or []):
+                                if hasattr(comp, "pdf_character") and comp.pdf_character and comp.pdf_character.char_unicode:
+                                    sample += comp.pdf_character.char_unicode
+                                elif hasattr(comp, "pdf_line") and comp.pdf_line:
+                                    for c in comp.pdf_line.pdf_character:
+                                        if c.char_unicode:
+                                            sample += c.char_unicode
+                                if len(sample) > 40:
+                                    break
+                            logger.warning(
+                                f"[LF_DEBUG_TS] scale={paragraph.optimal_scale:.3f} "
+                                f"w={paragraph.box.x2-paragraph.box.x:.1f} "
+                                f"text={repr(sample[:40])}"
+                            )
+                        except Exception:
+                            pass
 
         # 获取缩放因子的众数
         if all_scales:
