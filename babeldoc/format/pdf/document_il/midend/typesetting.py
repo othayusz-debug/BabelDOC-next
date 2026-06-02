@@ -1057,7 +1057,7 @@ class Typesetting:
                 for pd in para_positions[1:]:
                     prev_x = current_col[-1]["para"].box.x if current_col[-1]["para"].box else 0
                     curr_x = pd["para"].box.x if pd["para"].box else 0
-                    same_col = abs(curr_x - prev_x) < 8.0  # LinguaFlow Fix 3: 5→8pt
+                    same_col = abs(curr_x - prev_x) < 5.0
                     if same_col:
                         current_col.append(pd)
                     else:
@@ -1152,30 +1152,18 @@ class Typesetting:
         box = paragraph.box
         scale = initial_scale
         line_skip = 1.50 if self.is_cjk else 1.3
+        min_scale = 0.1
         expand_space_flag = 0
         final_typeset_units = None
 
-        # LinguaFlow: floor dinamico por idioma como min_scale do loop.
-        # Impede o scale de cair abaixo do minimo permitido para o idioma,
-        # resolvendo parágrafos com scale=0.60/0.70 que escapavam do
-        # effective_mode no preprocess_document.
-        import os as _os2
-        _env_floor2 = _os2.getenv("TYPESETTING_SCALE_FLOOR")
-        if _env_floor2 is not None:
-            try:
-                min_scale = float(_env_floor2)
-            except ValueError:
-                min_scale = 0.78
-        else:
-            _LANG_FLOORS2 = {
-                "EN": 0.82, "ES": 0.80, "IT": 0.80, "PT": 0.80,
-                "NL": 0.78, "RU": 0.74, "FR": 0.76, "DE": 0.72,
-                "PL": 0.74, "TR": 0.76, "AR": 0.80, "HI": 0.78,
-            }
-            if self.is_cjk:
-                min_scale = 0.85
-            else:
-                min_scale = _LANG_FLOORS2.get(self.lang_code[:2], 0.78)
+        # LinguaFlow: desabilita english_line_break quando o texto tem poucas
+        # unidades de tipagem (≤ 6 palavras) OU bbox é muito estreita (< 80pt).
+        # O lookahead causa quebras prematuras em "30 days", subtítulos curtos
+        # e células de tabela. Texto corrido tem muitas unidades e não é afetado.
+        _narrow_box = box and (box.x2 - box.x) < 80
+        _few_units = len(typesetting_units) <= 6
+        if use_english_line_break and (_narrow_box or _few_units):
+            use_english_line_break = False
 
         while scale >= min_scale:
             try:
@@ -1604,11 +1592,6 @@ class Typesetting:
             ):
                 current_x += space_width * 0.5
             if use_english_line_break:
-                # LinguaFlow Fix 1: [i+1:] evita double-counting do char atual.
-                # [i:] somava width(char_atual) dentro do lookahead E na verificação
-                # current_x + unit_width + lookahead → forçava quebra prematura
-                # Evita double-counting: [i+1:] exclui o char atual do lookahead.
-                # Edge case: i e o ultimo elemento -> [] -> retorna 0.
                 width_before_next_break_point = self._get_width_before_next_break_point(
                     typesetting_units[i + 1:], scale
                 )
