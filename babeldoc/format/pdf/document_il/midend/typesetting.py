@@ -1156,11 +1156,13 @@ class Typesetting:
         expand_space_flag = 0
         final_typeset_units = None
 
-        # LinguaFlow: desabilita english_line_break em bboxes estreitas.
-        # O lookahead reserva espaço para a próxima palavra, causando quebras
-        # prematuras em células pequenas ("30 days", "MINUTES", subtítulos).
-        # Bboxes < 120pt não têm espaço para ser conservadoras.
-        if use_english_line_break and box and (box.x2 - box.x) < 200:
+        # LinguaFlow: desabilita english_line_break quando o texto tem poucas
+        # unidades de tipagem (≤ 6 palavras) OU bbox é muito estreita (< 80pt).
+        # O lookahead causa quebras prematuras em "30 days", subtítulos curtos
+        # e células de tabela. Texto corrido tem muitas unidades e não é afetado.
+        _narrow_box = box and (box.x2 - box.x) < 80
+        _few_units = len(typesetting_units) <= 6
+        if use_english_line_break and (_narrow_box or _few_units):
             use_english_line_break = False
 
         while scale >= min_scale:
