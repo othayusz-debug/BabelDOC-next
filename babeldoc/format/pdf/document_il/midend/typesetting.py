@@ -1130,7 +1130,7 @@ class Typesetting:
         # O lookahead reserva espaço para a próxima palavra, causando quebras
         # prematuras em células pequenas ("30 days", "MINUTES", subtítulos).
         # Bboxes < 120pt não têm espaço para ser conservadoras.
-        if use_english_line_break and box and (box.x2 - box.x) < 120:
+        if use_english_line_break and box and (box.x2 - box.x) < 200:
             use_english_line_break = False
 
         while scale >= min_scale:
