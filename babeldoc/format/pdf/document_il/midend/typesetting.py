@@ -947,13 +947,25 @@ class Typesetting:
                         self.lang_code[:2], 0.78
                     )
 
-            # Aplica floor individual — sobe parágrafos abaixo do mínimo
+            # Aplica floor individual — sobe parágrafos abaixo do mínimo.
+            # v9.6.5: isenta parágrafos em bbox estreita (< 70pt) do floor.
+            # Para badges e identificadores curtos (ex: "Minutes No. 55E9"),
+            # o floor subia o scale para 0.78 mas o texto ainda não cabia na
+            # bbox estreita, causando quebra de linha (55E|9).
+            # Nesses casos, é melhor deixar o scale descer até o texto caber
+            # do que forçar um scale que garante o wrap.
             for paragraph in all_paragraphs:
                 if (
                     paragraph.optimal_scale is not None
                     and paragraph.optimal_scale < _SCALE_FLOOR_GLOBAL
                 ):
-                    paragraph.optimal_scale = _SCALE_FLOOR_GLOBAL
+                    box = paragraph.box
+                    is_narrow = (
+                        box is not None
+                        and (box.x2 - box.x) < 70
+                    )
+                    if not is_narrow:
+                        paragraph.optimal_scale = _SCALE_FLOOR_GLOBAL
 
             # Normaliza pela moda mas nunca abaixo do floor
             effective_mode = max(mode_scale, _SCALE_FLOOR_GLOBAL)
@@ -971,7 +983,12 @@ class Typesetting:
                 if (
                     paragraph.optimal_scale is not None
                     and paragraph.optimal_scale > effective_mode
-                    and paragraph.optimal_scale < 1.0
+                    and paragraph.optimal_scale <= 1.0  # v9.6.5: era < 1.0
+                    # Parágrafos em scale exato 1.0 (texto que coube perfeitamente
+                    # na bbox original) também são normalizados pela moda.
+                    # Sem isso, células TYPE/DATE/LOCATION ficavam em 1.0 enquanto
+                    # o resto do documento era comprimido para ~0.82, aparecendo
+                    # visivelmente maiores que o texto ao redor.
                 ):
                     paragraph.optimal_scale = effective_mode
 
@@ -1232,10 +1249,15 @@ class Typesetting:
             # depois baixo (para parágrafos multi-linha).
             space_expanded = False
             if expand_space_flag == 0:
-                # Tenta expandir para a direita primeiro
+                # Tenta expandir para a direita primeiro.
+                # v9.6.5: só expande se o ganho for > 40pt.
+                # Ganho pequeno (< 40pt) indica coluna adjacente de tabela —
+                # expandir invade a coluna vizinha sem clippath, causando
+                # overflow visual (ex: célula TASK invadindo coluna DEADLINE).
+                # Com ganho insuficiente, pula direto para expand-bottom.
                 try:
                     max_x = self.get_max_right_space(box, page) - 5
-                    if max_x > box.x2:
+                    if max_x > box.x2 + 40:
                         expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
                         box = expanded_box
                         if apply_layout:
@@ -1815,7 +1837,9 @@ class Typesetting:
             可以扩展到的最大 x 坐标
         """
         # 获取页面的裁剪框作为初始最大限制
-        max_x = page.cropbox.box.x2 * 0.9
+        # v9.6.5: 0.9 → 0.95 para dar mais espaço ao footer e evitar fallback
+        # sem word-break que causava quebra mid-word (ex: MINUT|ES).
+        max_x = page.cropbox.box.x2 * 0.95
 
         # 检查所有可能的阻挡元素
         for para in page.pdf_paragraph:
