@@ -1182,13 +1182,18 @@ class Typesetting:
         expand_space_flag = 0
         final_typeset_units = None
 
-        # LinguaFlow: desabilita english_line_break quando o texto tem poucas
-        # unidades de tipagem (≤ 6 palavras) OU bbox é muito estreita (< 80pt).
-        # O lookahead causa quebras prematuras em "30 days", subtítulos curtos
-        # e células de tabela. Texto corrido tem muitas unidades e não é afetado.
-        _narrow_box = box and (box.x2 - box.x) < 80
+        # LinguaFlow: desabilita english_line_break para:
+        # 1. bboxes estreitas (< 80pt) — badges e labels
+        # 2. poucas unidades (≤ 6) — texto curto
+        # 3. células de tabela de linha única (altura < 13pt, largura < 250pt)
+        #    O lookahead causa quebras prematuras em "Execution of the replacement..."
+        #    "30 days", "DEADLINE", subtítulos curtos etc.
+        _bbox_w = (box.x2 - box.x) if box else 999
+        _bbox_h = (box.y2 - box.y) if box else 999
+        _narrow_box = _bbox_w < 80
         _few_units = len(typesetting_units) <= 6
-        if use_english_line_break and (_narrow_box or _few_units):
+        _single_line_cell = _bbox_h < 13 and _bbox_w < 250
+        if use_english_line_break and (_narrow_box or _few_units or _single_line_cell):
             use_english_line_break = False
 
         while scale >= min_scale:
