@@ -955,7 +955,8 @@ class Typesetting:
                 ):
                     paragraph.optimal_scale = _SCALE_FLOOR_GLOBAL
 
-            # Normaliza pela moda mas nunca abaixo do floor
+            # Normaliza pela moda mas nunca abaixo do floor.
+            # Só toca parágrafos que já precisaram de redução (< 1.0).
             effective_mode = max(mode_scale, _SCALE_FLOOR_GLOBAL)
 
             _scales_before = [p.optimal_scale for p in all_paragraphs if p.optimal_scale is not None]
@@ -1225,18 +1226,20 @@ class Typesetting:
                 # 如果布局检查出错，继续尝试下一个缩放因子
                 pass
 
-            # LinguaFlow: tenta expandir espaço na primeira falha (scale == 0.95),
-            # antes de continuar reduzindo. O BabelDOC original só tentava quando
-            # scale < 0.7, tarde demais para textos EN ligeiramente mais longos.
-            # Ordem: primeiro direita (texto EN expande horizontalmente),
-            # depois baixo (para parágrafos multi-linha).
+            # LinguaFlow: tenta expandir para a direita na primeira falha,
+            # limitado a 20% da largura original para não ultrapassar bordas visuais.
+            # Depois tenta expandir para baixo. Só então reduz scale.
             space_expanded = False
+            original_width = paragraph.box.x2 - paragraph.box.x if paragraph.box else 0
+            max_expand_x = (paragraph.box.x2 + original_width * 0.2) if paragraph.box else box.x2
+
             if expand_space_flag == 0:
-                # Tenta expandir para a direita primeiro
                 try:
-                    max_x = self.get_max_right_space(box, page) - 5
-                    if max_x > box.x2:
-                        expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
+                    avail_x = self.get_max_right_space(box, page) - 5
+                    # Limita a 20% da largura original para não ultrapassar bordas visuais
+                    capped_x = min(avail_x, max_expand_x)
+                    if capped_x > box.x2:
+                        expanded_box = Box(x=box.x, y=box.y, x2=capped_x, y2=box.y2)
                         box = expanded_box
                         if apply_layout:
                             paragraph.box = expanded_box
@@ -1248,7 +1251,6 @@ class Typesetting:
                     continue
 
             elif expand_space_flag == 1:
-                # Tenta expandir para baixo
                 try:
                     min_y = self.get_max_bottom_space(box, page) + 2
                     if min_y < box.y:
@@ -1263,7 +1265,7 @@ class Typesetting:
                 if space_expanded:
                     continue
 
-            # Reduz scale após tentar expand
+            # Reduz scale após esgotar tentativas de expand
             if scale > 0.6:
                 scale -= 0.05
             else:
