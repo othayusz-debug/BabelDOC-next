@@ -957,29 +957,12 @@ class Typesetting:
 
             # Normaliza pela moda mas nunca abaixo do floor
             effective_mode = max(mode_scale, _SCALE_FLOOR_GLOBAL)
-
-            # LinguaFlow DEBUG — log escala real antes e depois da normalização
-            _scales_before = [p.optimal_scale for p in all_paragraphs if p.optimal_scale is not None]
-            logger.warning(
-                f"[SCALE DEBUG] lang={self.lang_code} | "
-                f"mode_scale={mode_scale:.4f} | "
-                f"floor={_SCALE_FLOOR_GLOBAL:.4f} | "
-                f"effective_mode={effective_mode:.4f} | "
-                f"scales={sorted(set(round(s,3) for s in _scales_before))}"
-            )
-
             for paragraph in all_paragraphs:
                 if (
                     paragraph.optimal_scale is not None
                     and paragraph.optimal_scale > effective_mode
                 ):
                     paragraph.optimal_scale = effective_mode
-
-            _scales_after = [p.optimal_scale for p in all_paragraphs if p.optimal_scale is not None]
-            logger.warning(
-                f"[SCALE DEBUG] após normalização | "
-                f"scales={sorted(set(round(s,3) for s in _scales_after))}"
-            )
 
             # LinguaFlow Fix 1 (v2): normalização de optimal_scale em dois níveis
             #
@@ -1224,10 +1207,6 @@ class Typesetting:
             except Exception:
                 # 如果布局检查出错，继续尝试下一个缩放因子
                 pass
-
-            # 添加与原 retypeset 一致的逻辑检查
-            if not hasattr(paragraph, "debug_id") or not paragraph.debug_id:
-                return scale, final_typeset_units
 
             # 减小缩放因子
             if scale > 0.6:
