@@ -964,16 +964,27 @@ class Typesetting:
                         box is not None
                         and (box.x2 - box.x) < 70
                     )
-                    # Fix C (v9.6.6): isenta também bbox larga (> 400pt) do floor.
+                    # Fix C (v9.6.6, rev v9.6.7): isenta footer de bbox larga do floor.
                     # O floor subia o scale do footer (ex: "MINUTES · DIGITAL MINUTES")
                     # para 0.78+ mas o texto ainda não cabia, causando fallback sem
-                    # word-break e quebra mid-word (MINUT|ES). Para bbox larga, é melhor
-                    # deixar o scale descer até o texto caber do que forçar um scale
-                    # que garante o wrap. O critério "narrow" é estendido para incluir
-                    # esse caso oposto (bbox muito larga com texto comprido).
+                    # word-break e quebra mid-word (MINUT|ES). Para o footer, é melhor
+                    # deixar o scale descer até o texto caber.
+                    # v9.6.7: critério refinado — bbox larga E posicionada no rodapé
+                    # (y < 8% da altura da página). Sem o critério vertical, o título
+                    # principal (MINUTES/MINUTA, também bbox larga) era isentado do
+                    # floor e ficava com scale maior que os outros parágrafos da página.
+                    try:
+                        # Footer está nos ~90pt inferiores da página no sistema BabelDOC
+                        # (origem embaixo). "MINUTES · DIGITAL MINUTES" tem y2 ~83pt;
+                        # "Automatically generated..." tem y2 ~75pt. O título MINUTES
+                        # está em y ~725pt — não é capturado por este threshold.
+                        _is_footer_position = box is not None and box.y2 < 90
+                    except Exception:
+                        _is_footer_position = False
                     is_wide_footer = (
                         box is not None
                         and (box.x2 - box.x) > 400
+                        and _is_footer_position
                     )
                     if not is_narrow and not is_wide_footer:
                         paragraph.optimal_scale = _SCALE_FLOOR_GLOBAL
@@ -1876,6 +1887,39 @@ class Typesetting:
                 figure.box.y >= current_box.y2 or figure.box.y2 <= current_box.y
             ):
                 max_x = min(max_x, figure.box.x)
+
+        # Fix D (v9.6.7): respeita curvas preenchidas que definem a borda direita
+        # da área de conteúdo da página.
+        #
+        # A tabela TYPE/DATE/LOCATION e a caixa EXECUTIVE SUMMARY não têm bordas
+        # laterais por célula — apenas linhas horizontais (e.g. x0=65, x1=546).
+        # O x2 dessas linhas define a borda direita real da área de texto.
+        # Sem este check, get_max_right_space retornava cropbox*0.95 (~581pt)
+        # e textos como LOCATION e EXECUTIVE SUMMARY extravasavam além de x1=546.
+        #
+        # Critério: linha horizontal (altura < 5pt) preenchida cujo x0 <= current_box.x
+        # e x2 < max_x atual — seu x2 define a borda direita da área de conteúdo.
+        for curve in page.pdf_curve:
+            try:
+                cr = curve.box if hasattr(curve, "box") and curve.box is not None else None
+                if cr is None:
+                    continue
+                fill = getattr(curve, "fill", None)
+                if fill is None:
+                    gs = getattr(curve, "graphic_state", None)
+                    if gs is not None:
+                        fill = getattr(gs, "fill_color", None)
+                if fill is None:
+                    continue
+                curve_height = cr.y2 - cr.y
+                curve_width  = cr.x2 - cr.x
+                # Linha horizontal (fina, larga) que se estende além do current_box
+                # e cujo x0 está à esquerda do current_box
+                is_horizontal_rule = curve_height < 5 and curve_width > 50
+                if is_horizontal_rule and cr.x <= current_box.x and cr.x2 < max_x:
+                    max_x = min(max_x, cr.x2)
+            except Exception:
+                continue
 
         return max_x
 
