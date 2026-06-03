@@ -1040,7 +1040,12 @@ class Typesetting:
                 current: list = [para_positions[0]]
                 for pd in para_positions[1:]:
                     prev     = current[-1]
-                    same_row = (pd["y_mid"] - prev["y_mid"]) < max(
+                    # LinguaFlow: usa topo da bbox (y2) para same-row.
+                    # y_mid falha quando elementos na mesma linha têm alturas
+                    # muito diferentes (ex: LOCATION 41pt vs TYPE/DATE 10pt).
+                    prev_top = prev["para"].box.y2 if prev["para"].box else prev["y_mid"]
+                    curr_top = pd["para"].box.y2 if pd["para"].box else pd["y_mid"]
+                    same_row = abs(curr_top - prev_top) < max(
                         prev["height"], pd["height"]
                     ) * 0.6
                     if same_row:
@@ -1226,50 +1231,68 @@ class Typesetting:
                 # 如果布局检查出错，继续尝试下一个缩放因子
                 pass
 
-            # LinguaFlow: tenta expandir para a direita na primeira falha,
-            # limitado a 20% da largura original para não ultrapassar bordas visuais.
-            # Depois tenta expandir para baixo. Só então reduz scale.
-            space_expanded = False
-            original_width = paragraph.box.x2 - paragraph.box.x if paragraph.box else 0
-            max_expand_x = (paragraph.box.x2 + original_width * 0.2) if paragraph.box else box.x2
+            # LinguaFlow: para bboxes muito pequenas (altura < 12pt) — badges e
+            # rodapés — não reduzir scale abaixo de 0.85. O texto quebra linha
+            # mas permanece legível. Reduzir para 0.60 é pior que quebrar linha.
+            try:
+                _bbox_h = paragraph.box.y2 - paragraph.box.y if paragraph.box else 99
+            except Exception:
+                _bbox_h = 99
+            if _bbox_h < 12 and scale <= 0.85:
+                break
 
-            if expand_space_flag == 0:
-                try:
-                    avail_x = self.get_max_right_space(box, page) - 5
-                    # Limita a 20% da largura original para não ultrapassar bordas visuais
-                    capped_x = min(avail_x, max_expand_x)
-                    if capped_x > box.x2:
-                        expanded_box = Box(x=box.x, y=box.y, x2=capped_x, y2=box.y2)
-                        box = expanded_box
-                        if apply_layout:
-                            paragraph.box = expanded_box
-                        space_expanded = True
-                except Exception:
-                    pass
-                expand_space_flag = 1
-                if space_expanded:
-                    continue
-
-            elif expand_space_flag == 1:
-                try:
-                    min_y = self.get_max_bottom_space(box, page) + 2
-                    if min_y < box.y:
-                        expanded_box = Box(x=box.x, y=min_y, x2=box.x2, y2=box.y2)
-                        box = expanded_box
-                        if apply_layout:
-                            paragraph.box = expanded_box
-                        space_expanded = True
-                except Exception:
-                    pass
-                expand_space_flag = 2
-                if space_expanded:
-                    continue
-
-            # Reduz scale após esgotar tentativas de expand
+            # 减小缩放因子
             if scale > 0.6:
                 scale -= 0.05
             else:
                 scale -= 0.1
+
+            if scale < 0.7:
+                space_expanded = False  # 标记是否成功扩展了空间
+
+                if expand_space_flag == 0:
+                    # 尝试向下扩展
+                    try:
+                        min_y = self.get_max_bottom_space(box, page) + 2
+                        if min_y < box.y:
+                            expanded_box = Box(x=box.x, y=min_y, x2=box.x2, y2=box.y2)
+                            box = expanded_box
+                            if apply_layout:
+                                # 更新段落的边界框
+                                paragraph.box = expanded_box
+                            space_expanded = True
+                    except Exception:
+                        pass
+                    expand_space_flag = 1
+
+                    # 只有成功扩展空间时才 continue，否则继续减小 scale
+                    if space_expanded:
+                        continue
+
+                elif expand_space_flag == 1:
+                    # 尝试向右扩展
+                    try:
+                        max_x = self.get_max_right_space(box, page) - 5
+                        if max_x > box.x2:
+                            expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
+                            box = expanded_box
+                            if apply_layout:
+                                # 更新段落的边界框
+                                paragraph.box = expanded_box
+                            space_expanded = True
+                    except Exception:
+                        pass
+                    expand_space_flag = 2
+
+                    # 只有成功扩展空间时才 continue，否则继续减小 scale
+                    if space_expanded:
+                        continue
+
+                # 只有在扩展尝试阶段 (expand_space_flag < 2) 且扩展失败时才重置 scale
+                # 当 expand_space_flag >= 2 时，说明已经尝试过所有扩展，应该继续正常的 scale 减小
+                if expand_space_flag < 2:
+                    # 如果无法扩展空间，重置 scale 并继续循环
+                    scale = 1.0
 
         # 如果仍然放不下，尝试去除英文换行限制
         if use_english_line_break:
