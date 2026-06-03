@@ -1215,6 +1215,23 @@ class Typesetting:
             return initial_scale, None
 
         box = paragraph.box
+
+        # Fix E (v9.6.8): margem de segurança no x2 da bbox para parágrafos
+        # dentro de células de tabela.
+        # O BabelDOC calcula scale=1.0 (texto "cabe") mas o texto renderizado
+        # ultrapassa o x2 da bbox porque a métrica de largura da NotoSans usada
+        # no cálculo de layout não bate exatamente com a largura de renderização.
+        # Resultado: LOCATION (x2=525) e EXECUTIVE SUMMARY (x2=531) extravasam.
+        #
+        # Critério: parágrafos com x2 entre 480 e 540 estão dentro de células
+        # de tabela (texto corrido vai até x2≈546). Reduz x2 em 8pt para forçar
+        # o layout a quebrar linha antes da borda real da célula.
+        _bbox_w = box.x2 - box.x
+        _in_table_cell = 480 < box.x2 < 540 and _bbox_w > 80
+        if _in_table_cell:
+            import copy as _copy
+            box = _copy.copy(box)
+            box.x2 = box.x2 - 8
         scale = initial_scale
         line_skip = 1.50 if self.is_cjk else 1.3
         min_scale = 0.1
