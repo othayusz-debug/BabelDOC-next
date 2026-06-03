@@ -1038,10 +1038,15 @@ class Typesetting:
                 row_regions: list = []
                 current: list = [para_positions[0]]
                 for pd in para_positions[1:]:
-                    prev     = current[-1]
-                    same_row = (pd["y_mid"] - prev["y_mid"]) < max(
-                        prev["height"], pd["height"]
-                    ) * 0.6
+                    prev = current[-1]
+                    # LinguaFlow: usa topo da bbox (y2 em coords PDF) com
+                    # tolerância fixa de 5pt para same-row. Evita que elementos
+                    # com alturas muito diferentes (LOCATION 41pt vs TYPE 10pt)
+                    # sejam tratados como linhas diferentes quando começam no
+                    # mesmo topo. Tolerância fixa evita agrupamentos incorretos.
+                    prev_top = prev["para"].box.y2 if (prev["para"].box and prev["para"].box.y2) else prev["y_mid"]
+                    curr_top = pd["para"].box.y2 if (pd["para"].box and pd["para"].box.y2) else pd["y_mid"]
+                    same_row = abs(curr_top - prev_top) < 5.0
                     if same_row:
                         current.append(pd)
                     else:
@@ -1225,14 +1230,8 @@ class Typesetting:
                 # 如果布局检查出错，继续尝试下一个缩放因子
                 pass
 
-            # LinguaFlow: para bboxes estreitas (< 80pt), retorna na primeira
-            # falha como o comportamento original — o texto faz overflow mas não
-            # quebra linha. Para bboxes largas, continua iterando normalmente.
-            try:
-                _bbox_w = paragraph.box.x2 - paragraph.box.x if paragraph.box else 999
-            except Exception:
-                _bbox_w = 999
-            if _bbox_w < 80:
+            # 添加与原 retypeset 一致的逻辑检查
+            if not hasattr(paragraph, "debug_id") or not paragraph.debug_id:
                 return scale, final_typeset_units
 
             # 减小缩放因子
@@ -1241,7 +1240,16 @@ class Typesetting:
             else:
                 scale -= 0.1
 
-            if scale < 0.7:
+            # LinguaFlow: para células de tabela com bbox de altura < 13pt,
+            # tenta expand para baixo mais cedo (scale < 0.85) porque o texto
+            # EN quebra linha e extrapola a bbox de uma linha (~12pt).
+            try:
+                _expand_h = paragraph.box.y2 - paragraph.box.y if paragraph.box else 99
+            except Exception:
+                _expand_h = 99
+            _expand_threshold = 0.85 if _expand_h < 13 else 0.7
+
+            if scale < _expand_threshold:
                 space_expanded = False  # 标记是否成功扩展了空间
 
                 if expand_space_flag == 0:
