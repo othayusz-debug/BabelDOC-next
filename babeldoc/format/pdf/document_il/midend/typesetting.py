@@ -955,19 +955,31 @@ class Typesetting:
                 ):
                     paragraph.optimal_scale = _SCALE_FLOOR_GLOBAL
 
-            # Normaliza pela moda mas nunca abaixo do floor.
-            # Só toca parágrafos que já precisaram de redução (optimal_scale < 1.0).
-            # Parágrafos onde o texto EN cabe sem redução (scale == 1.0) não são
-            # rebaixados artificialmente — isso causava o "texto global pequeno"
-            # porque parágrafos que caberiam em 1.0 eram forçados para a moda (~0.82).
+            # Normaliza pela moda mas nunca abaixo do floor
             effective_mode = max(mode_scale, _SCALE_FLOOR_GLOBAL)
+
+            # LinguaFlow DEBUG — log escala real antes e depois da normalização
+            _scales_before = [p.optimal_scale for p in all_paragraphs if p.optimal_scale is not None]
+            logger.warning(
+                f"[SCALE DEBUG] lang={self.lang_code} | "
+                f"mode_scale={mode_scale:.4f} | "
+                f"floor={_SCALE_FLOOR_GLOBAL:.4f} | "
+                f"effective_mode={effective_mode:.4f} | "
+                f"scales={sorted(set(round(s,3) for s in _scales_before))}"
+            )
+
             for paragraph in all_paragraphs:
                 if (
                     paragraph.optimal_scale is not None
                     and paragraph.optimal_scale > effective_mode
-                    and paragraph.optimal_scale < 1.0
                 ):
                     paragraph.optimal_scale = effective_mode
+
+            _scales_after = [p.optimal_scale for p in all_paragraphs if p.optimal_scale is not None]
+            logger.warning(
+                f"[SCALE DEBUG] após normalização | "
+                f"scales={sorted(set(round(s,3) for s in _scales_after))}"
+            )
 
             # LinguaFlow Fix 1 (v2): normalização de optimal_scale em dois níveis
             #
