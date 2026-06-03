@@ -956,7 +956,6 @@ class Typesetting:
                     paragraph.optimal_scale = _SCALE_FLOOR_GLOBAL
 
             # Normaliza pela moda mas nunca abaixo do floor.
-            # Só toca parágrafos que já precisaram de redução (< 1.0).
             effective_mode = max(mode_scale, _SCALE_FLOOR_GLOBAL)
 
             _scales_before = [p.optimal_scale for p in all_paragraphs if p.optimal_scale is not None]
@@ -1040,12 +1039,7 @@ class Typesetting:
                 current: list = [para_positions[0]]
                 for pd in para_positions[1:]:
                     prev     = current[-1]
-                    # LinguaFlow: usa topo da bbox (y2) para same-row.
-                    # y_mid falha quando elementos na mesma linha têm alturas
-                    # muito diferentes (ex: LOCATION 41pt vs TYPE/DATE 10pt).
-                    prev_top = prev["para"].box.y2 if prev["para"].box else prev["y_mid"]
-                    curr_top = pd["para"].box.y2 if pd["para"].box else pd["y_mid"]
-                    same_row = abs(curr_top - prev_top) < max(
+                    same_row = (pd["y_mid"] - prev["y_mid"]) < max(
                         prev["height"], pd["height"]
                     ) * 0.6
                     if same_row:
@@ -1231,16 +1225,6 @@ class Typesetting:
                 # 如果布局检查出错，继续尝试下一个缩放因子
                 pass
 
-            # LinguaFlow: para bboxes muito pequenas (altura < 12pt) — badges e
-            # rodapés — não reduzir scale abaixo de 0.85. O texto quebra linha
-            # mas permanece legível. Reduzir para 0.60 é pior que quebrar linha.
-            try:
-                _bbox_h = paragraph.box.y2 - paragraph.box.y if paragraph.box else 99
-            except Exception:
-                _bbox_h = 99
-            if _bbox_h < 12 and scale <= 0.85:
-                break
-
             # 减小缩放因子
             if scale > 0.6:
                 scale -= 0.05
@@ -1277,21 +1261,35 @@ class Typesetting:
                             expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
                             box = expanded_box
                             if apply_layout:
-                                # 更新段落的边界框
                                 paragraph.box = expanded_box
                             space_expanded = True
                     except Exception:
                         pass
                     expand_space_flag = 2
 
-                    # 只有成功扩展空间时才 continue，否则继续减小 scale
+                    if space_expanded:
+                        continue
+
+                elif expand_space_flag == 2:
+                    # LinguaFlow: tenta expandir para a esquerda.
+                    # Badges e rodapés no canto direito têm espaço livre à esquerda.
+                    try:
+                        min_x = self.get_max_left_space(box, page) + 2
+                        if min_x < box.x:
+                            expanded_box = Box(x=min_x, y=box.y, x2=box.x2, y2=box.y2)
+                            box = expanded_box
+                            if apply_layout:
+                                paragraph.box = expanded_box
+                            space_expanded = True
+                    except Exception:
+                        pass
+                    expand_space_flag = 3
+
                     if space_expanded:
                         continue
 
                 # 只有在扩展尝试阶段 (expand_space_flag < 2) 且扩展失败时才重置 scale
-                # 当 expand_space_flag >= 2 时，说明已经尝试过所有扩展，应该继续正常的 scale 减小
                 if expand_space_flag < 2:
-                    # 如果无法扩展空间，重置 scale 并继续循环
                     scale = 1.0
 
         # 如果仍然放不下，尝试去除英文换行限制
@@ -1864,6 +1862,28 @@ class Typesetting:
                 max_x = min(max_x, figure.box.x)
 
         return max_x
+
+    def get_max_left_space(self, current_box: Box, page) -> float:
+        """LinguaFlow: max space to the left of current_box."""
+        min_x = 10.0
+        for para in page.pdf_paragraph:
+            if para.box == current_box or para.box is None:
+                continue
+            if para.box.x2 < current_box.x and not (
+                para.box.y >= current_box.y2 or para.box.y2 <= current_box.y
+            ):
+                min_x = max(min_x, para.box.x2)
+        for char in page.pdf_character:
+            if char.box.x2 < current_box.x and not (
+                char.box.y >= current_box.y2 or char.box.y2 <= current_box.y
+            ):
+                min_x = max(min_x, char.box.x2)
+        for figure in page.pdf_figure:
+            if figure.box.x2 < current_box.x and not (
+                figure.box.y >= current_box.y2 or figure.box.y2 <= current_box.y
+            ):
+                min_x = max(min_x, figure.box.x2)
+        return min_x
 
     def get_max_bottom_space(self, current_box: Box, page: il_version_1.Page) -> float:
         """获取段落下方最大可用空间
