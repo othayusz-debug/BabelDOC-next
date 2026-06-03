@@ -1225,6 +1225,16 @@ class Typesetting:
                 # 如果布局检查出错，继续尝试下一个缩放因子
                 pass
 
+            # LinguaFlow: para bboxes estreitas (< 80pt), retorna na primeira
+            # falha como o comportamento original — o texto faz overflow mas não
+            # quebra linha. Para bboxes largas, continua iterando normalmente.
+            try:
+                _bbox_w = paragraph.box.x2 - paragraph.box.x if paragraph.box else 999
+            except Exception:
+                _bbox_w = 999
+            if _bbox_w < 80:
+                return scale, final_typeset_units
+
             # 减小缩放因子
             if scale > 0.6:
                 scale -= 0.05
