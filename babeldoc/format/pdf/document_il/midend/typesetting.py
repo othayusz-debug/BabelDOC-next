@@ -1081,10 +1081,19 @@ class Typesetting:
 
                 # ── Nível 2 Restaurado: normalização por altura (subtítulos) ──
                 # Parágrafos com a mesma altura de bbox (proxy para font_size)
-                # e texto curto (≤ 8 palavras) são normalizados juntos.
+                # e texto curto (≤ 15 palavras) são normalizados juntos.
                 # O filtro de palavras protege texto corrido: parágrafos longos
                 # naturalmente variam de escala e não devem ser tocados.
                 # Cobre: subtítulos H2/H3, labels, cabeçalhos de seção.
+                #
+                # LinguaFlow Fix T1: threshold elevado de 8 → 15 palavras.
+                # O threshold original de 8 excluía itens borderline como
+                # "Pedro Henrique Oliveira was re-elected deputy superintendent"
+                # (8 palavras exatas, excluído quando o número "05" era incluído
+                # no mesmo parágrafo elevando para 9). Resultado: item 5 da tabela
+                # RESOLUTIONS ficava com scale diferente dos demais.
+                # 15 palavras captura todos os subtítulos e itens de tabela sem
+                # afetar parágrafos de corpo de texto (que têm 20+ palavras).
                 from collections import defaultdict as _defaultdict
                 height_groups: dict = _defaultdict(list)
                 for pd in para_positions:
@@ -1105,7 +1114,7 @@ class Typesetting:
                                 for c in ([comp.pdf_character] if comp.pdf_character else
                                           (comp.pdf_line.pdf_character if comp.pdf_line else []))
                             ).split()
-                        ) <= 8
+                        ) <= 15
                     ]
                     if len(short_items) < 2:
                         continue
@@ -1156,7 +1165,14 @@ class Typesetting:
         expand_space_flag = 0
         final_typeset_units = None
 
-
+        # LinguaFlow: desabilita english_line_break quando o texto tem poucas
+        # unidades de tipagem (≤ 6 palavras) OU bbox é muito estreita (< 80pt).
+        # O lookahead causa quebras prematuras em "30 days", subtítulos curtos
+        # e células de tabela. Texto corrido tem muitas unidades e não é afetado.
+        _narrow_box = box and (box.x2 - box.x) < 80
+        _few_units = len(typesetting_units) <= 6
+        if use_english_line_break and (_narrow_box or _few_units):
+            use_english_line_break = False
 
         while scale >= min_scale:
             try:
@@ -1585,7 +1601,6 @@ class Typesetting:
             ):
                 current_x += space_width * 0.5
             if use_english_line_break:
-                # Fix 1: [i+1:] evita double-counting do char atual no lookahead
                 width_before_next_break_point = self._get_width_before_next_break_point(
                     typesetting_units[i + 1:], scale
                 )
