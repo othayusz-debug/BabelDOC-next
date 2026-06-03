@@ -1038,15 +1038,10 @@ class Typesetting:
                 row_regions: list = []
                 current: list = [para_positions[0]]
                 for pd in para_positions[1:]:
-                    prev = current[-1]
-                    # LinguaFlow: usa topo da bbox (y2 em coords PDF) com
-                    # tolerância fixa de 5pt para same-row. Evita que elementos
-                    # com alturas muito diferentes (LOCATION 41pt vs TYPE 10pt)
-                    # sejam tratados como linhas diferentes quando começam no
-                    # mesmo topo. Tolerância fixa evita agrupamentos incorretos.
-                    prev_top = prev["para"].box.y2 if (prev["para"].box and prev["para"].box.y2) else prev["y_mid"]
-                    curr_top = pd["para"].box.y2 if (pd["para"].box and pd["para"].box.y2) else pd["y_mid"]
-                    same_row = abs(curr_top - prev_top) < 5.0
+                    prev     = current[-1]
+                    same_row = (pd["y_mid"] - prev["y_mid"]) < max(
+                        prev["height"], pd["height"]
+                    ) * 0.6
                     if same_row:
                         current.append(pd)
                     else:
