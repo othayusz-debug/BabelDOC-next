@@ -955,12 +955,17 @@ class Typesetting:
                 ):
                     paragraph.optimal_scale = _SCALE_FLOOR_GLOBAL
 
-            # Normaliza pela moda mas nunca abaixo do floor
+            # Normaliza pela moda mas nunca abaixo do floor.
+            # Só toca parágrafos que já precisaram de redução (optimal_scale < 1.0).
+            # Parágrafos onde o texto EN cabe sem redução (scale == 1.0) não são
+            # rebaixados artificialmente — isso causava o "texto global pequeno"
+            # porque parágrafos que caberiam em 1.0 eram forçados para a moda (~0.82).
             effective_mode = max(mode_scale, _SCALE_FLOOR_GLOBAL)
             for paragraph in all_paragraphs:
                 if (
                     paragraph.optimal_scale is not None
                     and paragraph.optimal_scale > effective_mode
+                    and paragraph.optimal_scale < 1.0
                 ):
                     paragraph.optimal_scale = effective_mode
 
