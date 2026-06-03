@@ -1339,6 +1339,22 @@ class Typesetting:
         use_english_line_break: bool = True,
     ) -> float:
         """获取段落的最优缩放因子，不执行实际排版"""
+        # DEBUG (v9.6.8): loga bbox de todos os parágrafos antes do cálculo de escala.
+        # Permite identificar quais parágrafos têm bbox maior que a célula visual,
+        # explicando por que scale=1.0 mesmo com texto que extravasa visualmente.
+        try:
+            _box = paragraph.box
+            _txt = "".join(
+                u.try_get_unicode() or "" for u in typesetting_units
+            )[:50]
+            if _box:
+                logger.warning(
+                    f"[BBOX] w={_box.x2-_box.x:.1f} h={_box.y2-_box.y:.1f} "
+                    f"x={_box.x:.1f} x2={_box.x2:.1f} "
+                    f"y={_box.y:.1f} y2={_box.y2:.1f} | {repr(_txt)}"
+                )
+        except Exception:
+            pass
         scale, _ = self._find_optimal_scale_and_layout(
             paragraph,
             page,
