@@ -955,7 +955,7 @@ class Typesetting:
                 ):
                     paragraph.optimal_scale = _SCALE_FLOOR_GLOBAL
 
-            # Normaliza pela moda mas nunca abaixo do floor.
+            # Normaliza pela moda mas nunca abaixo do floor
             effective_mode = max(mode_scale, _SCALE_FLOOR_GLOBAL)
 
             _scales_before = [p.optimal_scale for p in all_paragraphs if p.optimal_scale is not None]
@@ -1182,18 +1182,13 @@ class Typesetting:
         expand_space_flag = 0
         final_typeset_units = None
 
-        # LinguaFlow: desabilita english_line_break para:
-        # 1. bboxes estreitas (< 80pt) — badges e labels
-        # 2. poucas unidades (≤ 6) — texto curto
-        # 3. células de tabela de linha única (altura < 13pt, largura < 250pt)
-        #    O lookahead causa quebras prematuras em "Execution of the replacement..."
-        #    "30 days", "DEADLINE", subtítulos curtos etc.
-        _bbox_w = (box.x2 - box.x) if box else 999
-        _bbox_h = (box.y2 - box.y) if box else 999
-        _narrow_box = _bbox_w < 80
+        # LinguaFlow: desabilita english_line_break quando o texto tem poucas
+        # unidades de tipagem (≤ 6 palavras) OU bbox é muito estreita (< 80pt).
+        # O lookahead causa quebras prematuras em "30 days", subtítulos curtos
+        # e células de tabela. Texto corrido tem muitas unidades e não é afetado.
+        _narrow_box = box and (box.x2 - box.x) < 80
         _few_units = len(typesetting_units) <= 6
-        _single_line_cell = _bbox_h < 13 and _bbox_w < 250
-        if use_english_line_break and (_narrow_box or _few_units or _single_line_cell):
+        if use_english_line_break and (_narrow_box or _few_units):
             use_english_line_break = False
 
         while scale >= min_scale:
@@ -1230,85 +1225,49 @@ class Typesetting:
                 # 如果布局检查出错，继续尝试下一个缩放因子
                 pass
 
-            # 添加与原 retypeset 一致的逻辑检查
-            if not hasattr(paragraph, "debug_id") or not paragraph.debug_id:
-                return scale, final_typeset_units
+            # LinguaFlow: tenta expandir espaço na primeira falha (scale == 0.95),
+            # antes de continuar reduzindo. O BabelDOC original só tentava quando
+            # scale < 0.7, tarde demais para textos EN ligeiramente mais longos.
+            # Ordem: primeiro direita (texto EN expande horizontalmente),
+            # depois baixo (para parágrafos multi-linha).
+            space_expanded = False
+            if expand_space_flag == 0:
+                # Tenta expandir para a direita primeiro
+                try:
+                    max_x = self.get_max_right_space(box, page) - 5
+                    if max_x > box.x2:
+                        expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
+                        box = expanded_box
+                        if apply_layout:
+                            paragraph.box = expanded_box
+                        space_expanded = True
+                except Exception:
+                    pass
+                expand_space_flag = 1
+                if space_expanded:
+                    continue
 
-            # 减小缩放因子
+            elif expand_space_flag == 1:
+                # Tenta expandir para baixo
+                try:
+                    min_y = self.get_max_bottom_space(box, page) + 2
+                    if min_y < box.y:
+                        expanded_box = Box(x=box.x, y=min_y, x2=box.x2, y2=box.y2)
+                        box = expanded_box
+                        if apply_layout:
+                            paragraph.box = expanded_box
+                        space_expanded = True
+                except Exception:
+                    pass
+                expand_space_flag = 2
+                if space_expanded:
+                    continue
+
+            # Reduz scale após tentar expand
             if scale > 0.6:
                 scale -= 0.05
             else:
                 scale -= 0.1
-
-            # LinguaFlow: para células de tabela com bbox de altura < 13pt,
-            # tenta expand para baixo mais cedo (scale < 0.85) porque o texto
-            # EN quebra linha e extrapola a bbox de uma linha (~12pt).
-            try:
-                _expand_h = paragraph.box.y2 - paragraph.box.y if paragraph.box else 99
-            except Exception:
-                _expand_h = 99
-            _expand_threshold = 0.85 if _expand_h < 13 else 0.7
-
-            if scale < _expand_threshold:
-                space_expanded = False  # 标记是否成功扩展了空间
-
-                if expand_space_flag == 0:
-                    # 尝试向下扩展
-                    try:
-                        min_y = self.get_max_bottom_space(box, page) + 2
-                        if min_y < box.y:
-                            expanded_box = Box(x=box.x, y=min_y, x2=box.x2, y2=box.y2)
-                            box = expanded_box
-                            if apply_layout:
-                                # 更新段落的边界框
-                                paragraph.box = expanded_box
-                            space_expanded = True
-                    except Exception:
-                        pass
-                    expand_space_flag = 1
-
-                    # 只有成功扩展空间时才 continue，否则继续减小 scale
-                    if space_expanded:
-                        continue
-
-                elif expand_space_flag == 1:
-                    # 尝试向右扩展
-                    try:
-                        max_x = self.get_max_right_space(box, page) - 5
-                        if max_x > box.x2:
-                            expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
-                            box = expanded_box
-                            if apply_layout:
-                                paragraph.box = expanded_box
-                            space_expanded = True
-                    except Exception:
-                        pass
-                    expand_space_flag = 2
-
-                    if space_expanded:
-                        continue
-
-                elif expand_space_flag == 2:
-                    # LinguaFlow: tenta expandir para a esquerda.
-                    # Badges e rodapés no canto direito têm espaço livre à esquerda.
-                    try:
-                        min_x = self.get_max_left_space(box, page) + 2
-                        if min_x < box.x:
-                            expanded_box = Box(x=min_x, y=box.y, x2=box.x2, y2=box.y2)
-                            box = expanded_box
-                            if apply_layout:
-                                paragraph.box = expanded_box
-                            space_expanded = True
-                    except Exception:
-                        pass
-                    expand_space_flag = 3
-
-                    if space_expanded:
-                        continue
-
-                # 只有在扩展尝试阶段 (expand_space_flag < 2) 且扩展失败时才重置 scale
-                if expand_space_flag < 2:
-                    scale = 1.0
 
         # 如果仍然放不下，尝试去除英文换行限制
         if use_english_line_break:
@@ -1880,28 +1839,6 @@ class Typesetting:
                 max_x = min(max_x, figure.box.x)
 
         return max_x
-
-    def get_max_left_space(self, current_box: Box, page) -> float:
-        """LinguaFlow: max space to the left of current_box."""
-        min_x = 10.0
-        for para in page.pdf_paragraph:
-            if para.box == current_box or para.box is None:
-                continue
-            if para.box.x2 < current_box.x and not (
-                para.box.y >= current_box.y2 or para.box.y2 <= current_box.y
-            ):
-                min_x = max(min_x, para.box.x2)
-        for char in page.pdf_character:
-            if char.box.x2 < current_box.x and not (
-                char.box.y >= current_box.y2 or char.box.y2 <= current_box.y
-            ):
-                min_x = max(min_x, char.box.x2)
-        for figure in page.pdf_figure:
-            if figure.box.x2 < current_box.x and not (
-                figure.box.y >= current_box.y2 or figure.box.y2 <= current_box.y
-            ):
-                min_x = max(min_x, figure.box.x2)
-        return min_x
 
     def get_max_bottom_space(self, current_box: Box, page: il_version_1.Page) -> float:
         """获取段落下方最大可用空间
