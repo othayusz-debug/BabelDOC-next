@@ -964,7 +964,18 @@ class Typesetting:
                         box is not None
                         and (box.x2 - box.x) < 70
                     )
-                    if not is_narrow:
+                    # Fix C (v9.6.6): isenta também bbox larga (> 400pt) do floor.
+                    # O floor subia o scale do footer (ex: "MINUTES · DIGITAL MINUTES")
+                    # para 0.78+ mas o texto ainda não cabia, causando fallback sem
+                    # word-break e quebra mid-word (MINUT|ES). Para bbox larga, é melhor
+                    # deixar o scale descer até o texto caber do que forçar um scale
+                    # que garante o wrap. O critério "narrow" é estendido para incluir
+                    # esse caso oposto (bbox muito larga com texto comprido).
+                    is_wide_footer = (
+                        box is not None
+                        and (box.x2 - box.x) > 400
+                    )
+                    if not is_narrow and not is_wide_footer:
                         paragraph.optimal_scale = _SCALE_FLOOR_GLOBAL
 
             # Normaliza pela moda mas nunca abaixo do floor
@@ -1255,9 +1266,13 @@ class Typesetting:
                 # expandir invade a coluna vizinha sem clippath, causando
                 # overflow visual (ex: célula TASK invadindo coluna DEADLINE).
                 # Com ganho insuficiente, pula direto para expand-bottom.
+                # Fix B (v9.6.6): revertido para +5pt. O guard das curvas (Fix A)
+                # é que realmente impede o overflow vertical; o threshold de +40pt
+                # era desnecessariamente restritivo e impedia expand-right legítimo
+                # em células como LOCATION (coluna da extremidade direita).
                 try:
                     max_x = self.get_max_right_space(box, page) - 5
-                    if max_x > box.x2 + 40:
+                    if max_x > box.x2 + 5:
                         expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
                         box = expanded_box
                         if apply_layout:
@@ -1897,6 +1912,38 @@ class Typesetting:
                 figure.box.x >= current_box.x2 or figure.box.x2 <= current_box.x
             ):
                 min_y = max(min_y, figure.box.y2)
+
+        # Fix A (v9.6.6): verifica curvas preenchidas (bordas de células/seções).
+        # get_max_bottom_space nunca verificava pdf_curve, então o bbox expandia
+        # para baixo atravessando os retângulos coloridos das células de tabela.
+        # Retângulos preenchidos que *contêm* o current_box definem o limite
+        # inferior real da célula — o texto não pode expandir além do y da borda.
+        import fitz as _fitz
+        for curve in page.pdf_curve:
+            try:
+                cr = curve.box if hasattr(curve, "box") and curve.box is not None else None
+                if cr is None:
+                    continue
+                # Só retângulos preenchidos (fill não nulo/não vazio)
+                fill = getattr(curve, "fill", None)
+                if fill is None:
+                    # Tenta via graphic_state
+                    gs = getattr(curve, "graphic_state", None)
+                    if gs is not None:
+                        fill = getattr(gs, "fill_color", None)
+                if fill is None:
+                    continue
+                # A curva deve envolver horizontalmente o current_box
+                # (cobre seu x e x2) e cobrir a parte inferior (y2 >= current_box.y2)
+                if (
+                    cr.x <= current_box.x
+                    and cr.x2 >= current_box.x2
+                    and cr.y2 >= current_box.y2  # cobre a parte de baixo
+                    and cr.y > min_y              # mais restritivo que o limite atual
+                ):
+                    min_y = max(min_y, cr.y)
+            except Exception:
+                continue
 
         return min_y
 
