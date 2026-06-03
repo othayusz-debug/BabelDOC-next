@@ -955,8 +955,7 @@ class Typesetting:
                 ):
                     paragraph.optimal_scale = _SCALE_FLOOR_GLOBAL
 
-            # Normaliza pela moda mas nunca abaixo do floor.
-            # Só toca parágrafos que já precisaram de redução (optimal_scale < 1.0).
+            # Normaliza pela moda mas nunca abaixo do floor
             effective_mode = max(mode_scale, _SCALE_FLOOR_GLOBAL)
 
             _scales_before = [p.optimal_scale for p in all_paragraphs if p.optimal_scale is not None]
@@ -1309,6 +1308,24 @@ class Typesetting:
             use_english_line_break,
             apply_layout=False,
         )
+        # LinguaFlow DEBUG — log por parágrafo com scale < 1.0
+        if scale < 1.0:
+            try:
+                box = paragraph.box
+                text = "".join(
+                    u.try_get_unicode() or ""
+                    for u in typesetting_units
+                    if u.try_get_unicode()
+                )[:60]
+                bbox_w = round(box.x2 - box.x, 1) if box else 0
+                bbox_h = round(box.y2 - box.y, 1) if box else 0
+                logger.warning(
+                    f"[PARA DEBUG] scale={scale:.2f} | "
+                    f"bbox=({bbox_w}x{bbox_h}) | "
+                    f"text={repr(text)}"
+                )
+            except Exception:
+                pass
         return scale
 
     def retypeset_with_precomputed_scale(
