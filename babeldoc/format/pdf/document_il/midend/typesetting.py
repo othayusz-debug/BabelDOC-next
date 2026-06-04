@@ -1232,7 +1232,13 @@ class Typesetting:
             _bbox_w = box.x2 - box.x
             if 80 < _bbox_w < 500:
                 box = copy.copy(box)
+                _old_x2 = box.x2
                 box.x2 = box.x2 - (_bbox_w * 0.05)
+                logger.warning(
+                    f"[FIX E] x2 {_old_x2:.1f} → {box.x2:.1f} "
+                    f"(redução={_bbox_w*0.05:.1f}pt) | "
+                    f"txt={repr(''.join(u.try_get_unicode() or '' for u in typesetting_units)[:30])}"
+                )
         scale = initial_scale
         line_skip = 1.50 if self.is_cjk else 1.3
         min_scale = 0.1
