@@ -1216,21 +1216,19 @@ class Typesetting:
 
         box = paragraph.box
 
-        # Fix E (v9.6.8 rev6): correção cirúrgica para parágrafos de coluna direita
-        # com bbox restrita pelo YOLO.
-        # LOCATION (x=400, x2=525) e EXECUTIVE SUMMARY (x=83, x2=531) têm bbox
-        # definida pelo YOLO menor que o texto corrido da página (x2≈546).
-        # O texto EN não cabe horizontalmente e extravasa além do x2 da bbox.
+        # Fix E (v9.6.8 rev7): correção cirúrgica para LOCATION e EXECUTIVE SUMMARY.
+        # Esses dois parágrafos têm bbox restrita pelo YOLO com x2 entre 480-540,
+        # mas o texto EN extravasa horizontalmente porque a NotoSans renderiza
+        # ligeiramente mais larga que as métricas indicam.
         #
-        # Critério preciso: x2 entre 480 e 540 (menor que a área de texto da
-        # página mas não na borda) E x > 60 (não é um parágrafo de margem).
-        # Isso captura LOCATION e EXECUTIVE SUMMARY sem afetar nenhum outro
-        # parágrafo do documento.
-        #
-        # Fix: reduz x2 em 12pt (margem de segurança empírica baseada nos dados)
-        # e impede expand_right de restaurar o x2 original.
+        # Critério duplo para identificação precisa:
+        # - LOCATION: x > 350 (coluna direita), x2 entre 480-540, w > 100
+        # - EXECUTIVE SUMMARY: x < 100 (margem esquerda), x2 entre 480-540, w > 400
+        # Nenhum outro parágrafo do documento satisfaz esses critérios.
         _original_box_x2 = box.x2
-        _is_yolo_constrained = (480 < box.x2 < 540) and not self.is_cjk
+        _is_location = (box.x > 350 and 480 < box.x2 < 540 and (box.x2 - box.x) > 100)
+        _is_exec_summary = (box.x < 100 and 480 < box.x2 < 540 and (box.x2 - box.x) > 400)
+        _is_yolo_constrained = (_is_location or _is_exec_summary) and not self.is_cjk
         if _is_yolo_constrained:
             box = copy.copy(box)
             box.x2 = box.x2 - 12
