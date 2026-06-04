@@ -1239,6 +1239,11 @@ class Typesetting:
                     f"(redução={_bbox_w*0.05:.1f}pt) | "
                     f"txt={repr(''.join(u.try_get_unicode() or '' for u in typesetting_units)[:30])}"
                 )
+        # Guarda o x2 original do parágrafo como teto para expand_right.
+        # O expand_right não deve expandir além do x2 original — caso contrário
+        # o Fix E (redução de x2 para compensar métrica de fonte) é anulado
+        # imediatamente pelo expand_right na primeira iteração do loop.
+        _original_box_x2 = paragraph.box.x2
         scale = initial_scale
         line_skip = 1.50 if self.is_cjk else 1.3
         min_scale = 0.1
@@ -1307,6 +1312,10 @@ class Typesetting:
                 # em células como LOCATION (coluna da extremidade direita).
                 try:
                     max_x = self.get_max_right_space(box, page) - 5
+                    # Fix E guard: expand_right não deve ultrapassar o x2 original
+                    # do parágrafo. Sem este teto, o expand_right restaura o x2
+                    # reduzido pelo Fix E, anulando a correção de métrica de fonte.
+                    max_x = min(max_x, _original_box_x2)
                     if max_x > box.x2 + 5:
                         expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
                         box = expanded_box
