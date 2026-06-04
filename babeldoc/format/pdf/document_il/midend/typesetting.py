@@ -1162,6 +1162,11 @@ class Typesetting:
                     if max_scale / max(min_scale, 0.01) < 1.05:
                         continue
                     region_scale = max(min_scale, _SCALE_FLOOR)
+                    logger.warning(
+                        f"[SAME-COL] x={region[0]['para'].box.x:.1f} | "
+                        f"scales={sorted(set(round(s,2) for s in scales))} → {region_scale:.2f} | "
+                        f"txts={[repr(p['para'].pdf_paragraph_id or '')[:15] for p in region[:3]]}"
+                    )
                     for pd in region:
                         if pd["para"].optimal_scale > region_scale:
                             pd["para"].optimal_scale = region_scale
