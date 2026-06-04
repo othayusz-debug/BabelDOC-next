@@ -1137,35 +1137,35 @@ class Typesetting:
                 # Parágrafos alinhados verticalmente na mesma coluna (mesmo box.x
                 # com tolerância de 5pt) usam a menor escala da coluna.
                 # Cobre: células de tabela na mesma coluna, listas numeradas.
-                para_positions.sort(key=lambda p: p["para"].box.x if p["para"].box else 0)
+                # v9.6.9: usa clustering por proximidade em vez de comparação
+                # sequencial, para evitar que parágrafos de x diferente quebrem
+                # grupos legítimos (ex: x=65 entre hidro-systemas x=72.8 e
+                # Pedro Henrique x=72.9).
+                x_groups: dict = {}
+                for pd in para_positions:
+                    px = pd["para"].box.x if pd["para"].box else 0
+                    matched = False
+                    for gx in list(x_groups.keys()):
+                        if abs(px - gx) < 5.0:
+                            x_groups[gx].append(pd)
+                            matched = True
+                            break
+                    if not matched:
+                        x_groups[px] = [pd]
 
-                col_regions: list = []
-                current_col: list = [para_positions[0]]
-                for pd in para_positions[1:]:
-                    prev_x = current_col[-1]["para"].box.x if current_col[-1]["para"].box else 0
-                    curr_x = pd["para"].box.x if pd["para"].box else 0
-                    same_col = abs(curr_x - prev_x) < 5.0
-                    if same_col:
-                        current_col.append(pd)
-                    else:
-                        col_regions.append(current_col)
-                        current_col = [pd]
-                col_regions.append(current_col)
-
-                for region in col_regions:
+                for gx, region in x_groups.items():
                     if len(region) < 2:
                         continue
                     scales = [p["scale"] for p in region]
                     min_scale = min(scales)
                     max_scale = max(scales)
-                    # Só normaliza se há variação real (> 5%) entre células da coluna
                     if max_scale / max(min_scale, 0.01) < 1.05:
                         continue
                     region_scale = max(min_scale, _SCALE_FLOOR)
                     logger.warning(
-                        f"[SAME-COL] x={region[0]['para'].box.x:.1f} | "
+                        f"[SAME-COL] x≈{gx:.1f} | "
                         f"scales={sorted(set(round(s,2) for s in scales))} → {region_scale:.2f} | "
-                        f"txts={[repr(p['para'].pdf_paragraph_id or '')[:15] for p in region[:3]]}"
+                        f"n={len(region)}"
                     )
                     for pd in region:
                         if pd["para"].optimal_scale > region_scale:
