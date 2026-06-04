@@ -1007,13 +1007,17 @@ class Typesetting:
                 ]
                 if _all_scales:
                     import statistics as _stats
-                    _median = _stats.median(
+                    _all_scales_full = sorted(
                         p.optimal_scale for p in all_paragraphs
                         if p.optimal_scale is not None
                     )
-                    effective_mode = max(_median, _SCALE_FLOOR_GLOBAL)
+                    # Usa o 25º percentil: parágrafos comprimidos puxam os não-comprimidos
+                    # para baixo, criando consistência visual sem comprimir demais.
+                    _idx = max(0, int(len(_all_scales_full) * 0.25) - 1)
+                    _p25 = _all_scales_full[_idx]
+                    effective_mode = max(_p25, _SCALE_FLOOR_GLOBAL)
                     logger.warning(
-                        f"[FIX F] mediana={_median:.4f} → effective_mode={effective_mode:.4f} "
+                        f"[FIX F] p25={_p25:.4f} → effective_mode={effective_mode:.4f} "
                         f"| compressed_scales={sorted(set(round(s,3) for s in _all_scales))}"
                     )
                 else:
@@ -1254,11 +1258,12 @@ class Typesetting:
         # Nenhum outro parágrafo do documento satisfaz esses critérios.
         _original_box_x2 = box.x2
         _is_location = (box.x > 350 and 480 < box.x2 < 540 and (box.x2 - box.x) > 100)
+        _is_exec_summary = (box.x < 100 and 480 < box.x2 < 540 and (box.x2 - box.x) > 400)
         # "Execution/Monitoring..." na célula TASK: x entre 150-220, x2 entre 340-400
         # "Automatically generated...": x < 80, x2 entre 230-280, y2 < 90 (rodapé)
         _is_task_cell = (150 < box.x < 220 and 340 < box.x2 < 400)
         _is_footer_left = (box.x < 80 and 230 < box.x2 < 280 and box.y2 < 90)
-        _is_yolo_constrained = (_is_location or _is_task_cell or _is_footer_left) and not self.is_cjk
+        _is_yolo_constrained = (_is_location or _is_exec_summary or _is_task_cell or _is_footer_left) and not self.is_cjk
         if _is_yolo_constrained:
             box = copy.copy(box)
             box.x2 = box.x2 - 2.5
