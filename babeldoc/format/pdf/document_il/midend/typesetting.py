@@ -1216,21 +1216,23 @@ class Typesetting:
 
         box = paragraph.box
 
-        # Fix E (v9.6.8 rev3): margem de correção de métrica de fonte para células de tabela.
-        # O BabelDOC calcula scale=1.0 (texto "cabe") mas o texto renderizado
-        # ultrapassa o x2 da bbox porque as métricas da NotoSans subestimam
-        # ~6% a largura real de renderização.
-        # Fix: reduz x2 em 6% da largura da bbox para parágrafos dentro de células
-        # de tabela (480 < x2 < 540, w > 80), forçando o layout a detectar overflow
-        # e quebrar linha antes da borda real da célula.
-        # _narrow_box usa a largura original (antes da redução) para não suprimir
-        # erroneamente o english_line_break em células legitimamente estreitas.
-        _bbox_w = box.x2 - box.x
-        _in_table_cell = 480 < box.x2 < 540 and _bbox_w > 80
-        if _in_table_cell:
-            import copy as _copy
-            box = _copy.copy(box)
-            box.x2 = box.x2 - (_bbox_w * 0.06)
+        # Fix E (v9.6.8 rev5): correção de métrica de fonte para não-CJK.
+        # O BabelDOC substitui fontes originais (Georgia, TimesNewRoman) por NotoSans.
+        # As métricas da NotoSans subestimam a largura real de renderização em ~5%,
+        # fazendo o layout calcular scale=1.0 (texto "cabe") mas o texto renderizado
+        # extravasa o x2 da bbox. Afeta especialmente LOCATION e EXECUTIVE SUMMARY,
+        # que têm bbox ajustada pelo YOLO e não pela borda da página.
+        #
+        # Fix: para parágrafos não-CJK com bbox larga (>80pt), reduz x2 em 5%
+        # da largura para compensar a diferença de métrica. Parágrafos estreitos
+        # (<80pt) não são afetados — já têm tratamento de _narrow_box.
+        # Parágrafos que ocupam toda a largura da página (x2 > 540 neste doc)
+        # não são afetados — já têm margens suficientes.
+        if not self.is_cjk:
+            _bbox_w = box.x2 - box.x
+            if 80 < _bbox_w < 500:
+                box = copy.copy(box)
+                box.x2 = box.x2 - (_bbox_w * 0.05)
         scale = initial_scale
         line_skip = 1.50 if self.is_cjk else 1.3
         min_scale = 0.1
