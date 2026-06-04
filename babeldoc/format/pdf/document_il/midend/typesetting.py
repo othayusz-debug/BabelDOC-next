@@ -992,6 +992,27 @@ class Typesetting:
             # Normaliza pela moda mas nunca abaixo do floor
             effective_mode = max(mode_scale, _SCALE_FLOOR_GLOBAL)
 
+            # Fix F (v9.6.9): quando a moda é 1.0 mas há parágrafos com scale < 1.0,
+            # a moda não representa o "tamanho dominante" da página — apenas indica
+            # que a maioria do texto coube sem compressão. Nesse caso, parágrafos
+            # comprimidos (ex: 0.80) ficam visivelmente menores que os não-comprimidos
+            # (1.0), criando inconsistência visual dentro da mesma tabela/seção.
+            # Fix: se mode=1.0 e há parágrafos com scale < 0.95, usa a mediana das
+            # escalas como effective_mode, forçando os parágrafos em 1.0 a serem
+            # comprimidos para o nível mediano da página.
+            if effective_mode >= 1.0:
+                _all_scales = [
+                    p.optimal_scale for p in all_paragraphs
+                    if p.optimal_scale is not None and p.optimal_scale < 0.95
+                ]
+                if _all_scales:
+                    import statistics as _stats
+                    _median = _stats.median(
+                        p.optimal_scale for p in all_paragraphs
+                        if p.optimal_scale is not None
+                    )
+                    effective_mode = max(_median, _SCALE_FLOOR_GLOBAL)
+
             _scales_before = [p.optimal_scale for p in all_paragraphs if p.optimal_scale is not None]
             logger.warning(
                 f"[SCALE DEBUG] lang={self.lang_code} | "
@@ -1235,7 +1256,7 @@ class Typesetting:
         _is_yolo_constrained = (_is_location or _is_exec_summary or _is_task_cell or _is_footer_left) and not self.is_cjk
         if _is_yolo_constrained:
             box = copy.copy(box)
-            box.x2 = box.x2 - 12
+            box.x2 = box.x2 - 2.5
             logger.warning(
                 f"[FIX E] x2 {_original_box_x2:.1f} → {box.x2:.1f} (YOLO-constrained) | "
                 f"txt={repr(''.join(u.try_get_unicode() or '' for u in typesetting_units)[:30])}"
