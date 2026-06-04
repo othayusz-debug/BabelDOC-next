@@ -1228,7 +1228,11 @@ class Typesetting:
         _original_box_x2 = box.x2
         _is_location = (box.x > 350 and 480 < box.x2 < 540 and (box.x2 - box.x) > 100)
         _is_exec_summary = (box.x < 100 and 480 < box.x2 < 540 and (box.x2 - box.x) > 400)
-        _is_yolo_constrained = (_is_location or _is_exec_summary) and not self.is_cjk
+        # Fix E também cobre a célula TASK (x=176, x2=371) e o footer esquerdo
+        # (x=65, x2=258) — ambos têm texto EN que extravasa com scale=1.0.
+        _is_task_cell = (150 < box.x < 210 and 340 < box.x2 < 400 and (box.x2 - box.x) > 150)
+        _is_footer_left = (box.x < 80 and 230 < box.x2 < 280 and (box.x2 - box.x) > 150)
+        _is_yolo_constrained = (_is_location or _is_exec_summary or _is_task_cell or _is_footer_left) and not self.is_cjk
         if _is_yolo_constrained:
             box = copy.copy(box)
             box.x2 = box.x2 - 12
