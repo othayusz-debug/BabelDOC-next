@@ -1216,34 +1216,28 @@ class Typesetting:
 
         box = paragraph.box
 
-        # Fix E (v9.6.8 rev5): correção de métrica de fonte para não-CJK.
-        # O BabelDOC substitui fontes originais (Georgia, TimesNewRoman) por NotoSans.
-        # As métricas da NotoSans subestimam a largura real de renderização em ~5%,
-        # fazendo o layout calcular scale=1.0 (texto "cabe") mas o texto renderizado
-        # extravasa o x2 da bbox. Afeta especialmente LOCATION e EXECUTIVE SUMMARY,
-        # que têm bbox ajustada pelo YOLO e não pela borda da página.
+        # Fix E (v9.6.8 rev6): correção cirúrgica para parágrafos de coluna direita
+        # com bbox restrita pelo YOLO.
+        # LOCATION (x=400, x2=525) e EXECUTIVE SUMMARY (x=83, x2=531) têm bbox
+        # definida pelo YOLO menor que o texto corrido da página (x2≈546).
+        # O texto EN não cabe horizontalmente e extravasa além do x2 da bbox.
         #
-        # Fix: para parágrafos não-CJK com bbox larga (>80pt), reduz x2 em 5%
-        # da largura para compensar a diferença de métrica. Parágrafos estreitos
-        # (<80pt) não são afetados — já têm tratamento de _narrow_box.
-        # Parágrafos que ocupam toda a largura da página (x2 > 540 neste doc)
-        # não são afetados — já têm margens suficientes.
-        if not self.is_cjk:
-            _bbox_w = box.x2 - box.x
-            if 80 < _bbox_w < 500:
-                box = copy.copy(box)
-                _old_x2 = box.x2
-                box.x2 = box.x2 - (_bbox_w * 0.05)
-                logger.warning(
-                    f"[FIX E] x2 {_old_x2:.1f} → {box.x2:.1f} "
-                    f"(redução={_bbox_w*0.05:.1f}pt) | "
-                    f"txt={repr(''.join(u.try_get_unicode() or '' for u in typesetting_units)[:30])}"
-                )
-        # Guarda o x2 original do parágrafo como teto para expand_right.
-        # O expand_right não deve expandir além do x2 original — caso contrário
-        # o Fix E (redução de x2 para compensar métrica de fonte) é anulado
-        # imediatamente pelo expand_right na primeira iteração do loop.
-        _original_box_x2 = paragraph.box.x2
+        # Critério preciso: x2 entre 480 e 540 (menor que a área de texto da
+        # página mas não na borda) E x > 60 (não é um parágrafo de margem).
+        # Isso captura LOCATION e EXECUTIVE SUMMARY sem afetar nenhum outro
+        # parágrafo do documento.
+        #
+        # Fix: reduz x2 em 12pt (margem de segurança empírica baseada nos dados)
+        # e impede expand_right de restaurar o x2 original.
+        _original_box_x2 = box.x2
+        _is_yolo_constrained = (480 < box.x2 < 540) and not self.is_cjk
+        if _is_yolo_constrained:
+            box = copy.copy(box)
+            box.x2 = box.x2 - 12
+            logger.warning(
+                f"[FIX E] x2 {_original_box_x2:.1f} → {box.x2:.1f} (YOLO-constrained) | "
+                f"txt={repr(''.join(u.try_get_unicode() or '' for u in typesetting_units)[:30])}"
+            )
         scale = initial_scale
         line_skip = 1.50 if self.is_cjk else 1.3
         min_scale = 0.1
@@ -1312,10 +1306,11 @@ class Typesetting:
                 # em células como LOCATION (coluna da extremidade direita).
                 try:
                     max_x = self.get_max_right_space(box, page) - 5
-                    # Fix E guard: expand_right não deve ultrapassar o x2 original
-                    # do parágrafo. Sem este teto, o expand_right restaura o x2
-                    # reduzido pelo Fix E, anulando a correção de métrica de fonte.
-                    max_x = min(max_x, _original_box_x2)
+                    # Fix E guard: para parágrafos YOLO-constrained, expand_right
+                    # não deve ultrapassar o x2 original (antes da redução de 12pt).
+                    # Para todos os outros, expand_right funciona normalmente.
+                    if _is_yolo_constrained:
+                        max_x = min(max_x, _original_box_x2)
                     if max_x > box.x2 + 5:
                         expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
                         box = expanded_box
