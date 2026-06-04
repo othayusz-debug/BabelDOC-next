@@ -1129,6 +1129,11 @@ class Typesetting:
                     if max_scale / max(min_scale, 0.01) < 1.05:
                         continue
                     region_scale = max(min_scale, _SCALE_FLOOR)
+                    logger.warning(
+                        f"[SAME-ROW] y_mid≈{region[0]['y_mid']:.1f} | "
+                        f"scales={sorted(set(round(s,2) for s in scales))} → {region_scale:.2f} | "
+                        f"n={len(region)}"
+                    )
                     for pd in region:
                         if pd["para"].optimal_scale > region_scale:
                             pd["para"].optimal_scale = region_scale
